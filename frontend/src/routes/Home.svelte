@@ -1,17 +1,26 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { api, type SearchResult } from '../api'
   import VideoCard from '../lib/VideoCard.svelte'
 
-  const params = new URLSearchParams(window.location.search)
-  let query = $state(params.get('q') || '')
+  let query = $state(new URLSearchParams(window.location.search).get('q') || '')
   let results = $state<SearchResult[]>([])
   let loading = $state(false)
   let error = $state('')
+
+  onMount(() => {
+    function onNav() {
+      query = new URLSearchParams(window.location.search).get('q') || ''
+    }
+    window.addEventListener('popstate', onNav)
+    return () => window.removeEventListener('popstate', onNav)
+  })
 
   $effect(() => {
     if (query) {
       loading = true
       error = ''
+      results = []
       api.search(query)
         .then(r => { results = r; loading = false })
         .catch(e => { error = e.message; loading = false })

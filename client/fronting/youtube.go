@@ -329,7 +329,12 @@ func (y *YouTubeClient) Search(ctx context.Context, query string, n int) ([]Sear
 		return nil, err
 	}
 	var results []SearchResult
-	contents := walkPath(data, "contents", "sectionListRenderer", "contents")
+	// Try twoColumn layout (WEB client) first, fall back to direct sectionListRenderer.
+	contents := walkPath(data, "contents", "twoColumnSearchResultsRenderer",
+		"primaryContents", "sectionListRenderer", "contents")
+	if contents == nil {
+		contents = walkPath(data, "contents", "sectionListRenderer", "contents")
+	}
 	for _, section := range asList(contents) {
 		items := walkPath(section, "itemSectionRenderer", "contents")
 		for _, item := range asList(items) {
