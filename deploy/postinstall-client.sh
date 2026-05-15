@@ -1,6 +1,26 @@
 #!/bin/sh
 set -e
 
+# Create system user
+if ! id mattube > /dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin mattube
+fi
+
+# Create required directories
+mkdir -p /etc/mattube /opt/mattube /var/lib/mattube
+
+# Fix ownership so the service can read config and write DB
+chown mattube:mattube /opt/mattube /var/lib/mattube
+if [ -f /etc/mattube/credentials.json ]; then
+    chown mattube:mattube /etc/mattube/credentials.json
+fi
+if [ -f /etc/mattube/drive_token.json ]; then
+    chown mattube:mattube /etc/mattube/drive_token.json
+fi
+if [ -f /etc/mattube/config.json ]; then
+    chown mattube:mattube /etc/mattube/config.json
+fi
+
 systemctl daemon-reload
 systemctl enable mattube-client
 
