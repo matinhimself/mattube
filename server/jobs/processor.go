@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +59,15 @@ func (p *Processor) Process(ctx context.Context, req *Request) {
 		return
 	}
 
+	// Chunked mode: segment into TS and upload each chunk as it's ready
+	if req.ChunkDurationS > 0 {
+		log.Printf("[%s] chunking: %ds segments", req.JobID, req.ChunkDurationS)
+		if err := p.processChunked(ctx, req, outPath, statusFileID); err != nil {
+			p.updateStatus(ctx, statusFileID, req.JobID, StatusFailed, 0, "", err.Error())
+		}
+		return
+	}
+
 	// Remux with faststart for iOS streaming
 	log.Printf("[%s] remuxing with faststart: %s", req.JobID, outPath)
 	outPath, err = remuxFaststart(ctx, outPath)
@@ -96,6 +106,8 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 		"--no-playlist",
 		"--progress",
 		"--newline",
+		"--concurrent-fragments", "4",
+		"--throttled-rate", "100K",
 	}
 	args = append(args, req.URL)
 
@@ -146,6 +158,84 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 		}
 	}
 	return "", fmt.Errorf("no .mp4 found in %s after download", jobDir)
+}
+
+func (p *Processor) processChunked(ctx context.Context, req *Request, inputPath, statusFileID string) error {
+	dir := filepath.Dir(inputPath)
+	pattern := filepath.Join(dir, "chunk_%03d.ts")
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", inputPath,
+		"-c", "copy", "-f", "segment",
+		"-segment_time", strconv.Itoa(req.ChunkDurationS),
+		"-reset_timestamps", "0",
+		pattern)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("ffmpeg segment: %w\n%s", err, out)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("readdir: %w", err)
+	}
+	var chunkPaths []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "chunk_") && strings.HasSuffix(e.Name(), ".ts") {
+			chunkPaths = append(chunkPaths, filepath.Join(dir, e.Name()))
+		}
+	}
+	sort.Strings(chunkPaths)
+
+	total := len(chunkPaths)
+	log.Printf("[%s] segmented into %d chunks", req.JobID, total)
+	p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkDurationS, total, nil, false)
+
+	var uploaded []ChunkRef
+	for i, path := range chunkPaths {
+		dur := probeChunkDuration(path)
+		driveID, err := p.driveClient.UploadFile(ctx, p.outputFolder, path, "video/mp2t")
+		if err != nil {
+			return fmt.Errorf("upload chunk %d: %w", i, err)
+		}
+		uploaded = append(uploaded, ChunkRef{Index: i, DriveFileID: driveID, DurationS: dur})
+		p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkDurationS, total, uploaded, false)
+		log.Printf("[%s] uploaded chunk %d/%d (%.1fs)", req.JobID, i+1, total, dur)
+	}
+
+	p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkDurationS, total, uploaded, true)
+	return nil
+}
+
+func (p *Processor) updateChunkStatus(ctx context.Context, fileID, jobID string, chunkTargetS, totalChunks int, chunks []ChunkRef, done bool) {
+	st := StatusChunking
+	if done {
+		st = StatusDone
+	}
+	s := &Status{
+		JobID:        jobID,
+		Status:       st,
+		TotalChunks:  totalChunks,
+		ChunkTargetS: chunkTargetS,
+		Chunks:       chunks,
+		UpdatedAt:    now(),
+	}
+	if fileID == "" {
+		p.driveClient.UploadJSON(ctx, p.statusFolder, "status-"+jobID+".json", s) //nolint:errcheck
+		return
+	}
+	if err := p.driveClient.UpdateJSON(ctx, fileID, s); err != nil {
+		log.Printf("[%s] warn: update chunk status: %v", jobID, err)
+	}
+}
+
+func probeChunkDuration(path string) float64 {
+	out, err := exec.Command("ffprobe", "-v", "quiet",
+		"-show_entries", "format=duration",
+		"-of", "csv=p=0", path).Output()
+	if err != nil {
+		return 0
+	}
+	d, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	return d
 }
 
 func remuxFaststart(ctx context.Context, input string) (string, error) {

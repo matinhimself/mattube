@@ -5,6 +5,7 @@ export interface Track {
   channelName: string
   thumbnailUrl: string
   duration: number
+  chunked?: boolean
 }
 
 // Svelte 5: share reactive state via a class (properties are reactive by default)
@@ -17,9 +18,9 @@ class PlayerStore {
 
   private _play: (() => void) | null = null
   private _pause: (() => void) | null = null
-  private _setSrc: ((url: string) => void) | null = null
+  private _setSrc: ((url: string, type: string) => void) | null = null
 
-  registerCallbacks(play: () => void, pause: () => void, setSrc: (url: string) => void) {
+  registerCallbacks(play: () => void, pause: () => void, setSrc: (url: string, type: string) => void) {
     this._play = play
     this._pause = pause
     this._setSrc = setSrc
@@ -28,7 +29,8 @@ class PlayerStore {
   loadTrack(track: Track) {
     this.currentTrack = track
     this.playing = false
-    this._setSrc?.(`/api/jobs/${track.jobId}/stream`)
+    const type = track.chunked ? 'application/x-mpegURL' : 'video/mp4'
+    this._setSrc?.(`/api/jobs/${track.jobId}/stream`, type)
     this._play?.()
     this.playing = true
     this.minimized = false

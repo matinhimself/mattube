@@ -12,27 +12,39 @@ const (
 	StatusQueued      = "queued"
 	StatusDownloading = "downloading"
 	StatusUploading   = "uploading"
+	StatusChunking    = "chunking"
 	StatusDone        = "done"
 	StatusFailed      = "failed"
 )
 
 // Request is read from request-<id>.json on Drive.
 type Request struct {
-	JobID       string `json:"job_id"`
-	URL         string `json:"url"`
-	Quality     string `json:"quality"`
-	RequestedAt string `json:"requested_at"`
+	JobID          string `json:"job_id"`
+	URL            string `json:"url"`
+	Quality        string `json:"quality"`
+	RequestedAt    string `json:"requested_at"`
+	ChunkDurationS int    `json:"chunk_duration_s,omitempty"`
+}
+
+// ChunkRef identifies a single uploaded segment.
+type ChunkRef struct {
+	Index       int     `json:"index"`
+	DriveFileID string  `json:"drive_file_id"`
+	DurationS   float64 `json:"duration_s"`
 }
 
 // Status is written to status-<id>.json on Drive.
 type Status struct {
-	JobID         string `json:"job_id"`
-	Status        string `json:"status"`
-	Progress      int    `json:"progress"`
-	DriveFileID   string `json:"drive_file_id,omitempty"`
-	DriveFileName string `json:"drive_file_name,omitempty"`
-	Error         string `json:"error,omitempty"`
-	UpdatedAt     string `json:"updated_at"`
+	JobID         string     `json:"job_id"`
+	Status        string     `json:"status"`
+	Progress      int        `json:"progress"`
+	DriveFileID   string     `json:"drive_file_id,omitempty"`
+	DriveFileName string     `json:"drive_file_name,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	UpdatedAt     string     `json:"updated_at"`
+	TotalChunks   int        `json:"total_chunks,omitempty"`
+	ChunkTargetS  int        `json:"chunk_target_s,omitempty"`
+	Chunks        []ChunkRef `json:"chunks,omitempty"`
 }
 
 // StatusWriter is implemented by the poller to persist status back to Drive.

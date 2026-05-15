@@ -34,13 +34,22 @@ export interface ChannelInfo {
   subscribers: string
 }
 
+export interface ChunkRef {
+  index: number
+  drive_file_id: string
+  duration_s: number
+}
+
 export interface JobStatus {
   job_id: string
-  status: 'pending' | 'queued' | 'downloading' | 'uploading' | 'done' | 'failed'
+  status: 'pending' | 'queued' | 'downloading' | 'uploading' | 'chunking' | 'done' | 'failed'
   progress: number
   drive_file_id?: string
   error?: string
   updated_at: string
+  total_chunks?: number
+  chunk_target_s?: number
+  chunks?: ChunkRef[]
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -70,17 +79,20 @@ export const api = {
   getVideo: (videoId: string): Promise<VideoInfo> =>
     request(`/api/video/${videoId}`),
 
+  getRelatedVideos: (videoId: string): Promise<SearchResult[]> =>
+    request(`/api/video/${videoId}/related`),
+
   getChannel: (channelId: string): Promise<ChannelInfo> =>
     request(`/api/channel/${channelId}`),
 
   getChannelVideos: (channelId: string): Promise<SearchResult[]> =>
     request(`/api/channel/${channelId}/videos`),
 
-  submitJob: (url: string, quality = '1080p'): Promise<{ job_id: string }> =>
+  submitJob: (url: string, quality = '1080p', chunkDurationS = 0): Promise<{ job_id: string }> =>
     request('/api/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, quality }),
+      body: JSON.stringify({ url, quality, chunk_duration_s: chunkDurationS }),
     }),
 
   getJobStatus: (jobId: string): Promise<JobStatus> =>
@@ -110,4 +122,9 @@ export const api = {
 
   deleteUser: (userId: number): Promise<void> =>
     request(`/admin/users/${userId}`, { method: 'DELETE' }),
+
+  driveStatus: (): Promise<{ connected: boolean; creds_ready: boolean }> =>
+    request('/admin/drive/status'),
+
+  driveConnectUrl: () => '/admin/drive/connect',
 }

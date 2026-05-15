@@ -66,7 +66,7 @@
     player.registerCallbacks(
       () => vjs.play(),
       () => vjs.pause(),
-      (url: string) => vjs.src({ src: url, type: 'video/mp4' })
+      (url: string, type: string) => vjs.src({ src: url, type })
     )
   })
 
