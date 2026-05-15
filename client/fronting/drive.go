@@ -9,8 +9,13 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"os"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
+
+	"golang.org/x/oauth2"
 )
 
 const (
@@ -20,15 +25,93 @@ const (
 
 // DriveClient performs Drive operations via the fronting transport.
 type DriveClient struct {
-	http        *http.Client
-	accessToken string // OAuth Bearer token
+	http *http.Client
+	mu   sync.RWMutex
+	ts   oauth2.TokenSource
+}
+
+// staticTokenSource wraps a fixed access token with no refresh capability.
+type staticTokenSource struct{ token string }
+
+func (s *staticTokenSource) Token() (*oauth2.Token, error) {
+	if s.token == "" {
+		return nil, fmt.Errorf("no Drive token configured")
+	}
+	return &oauth2.Token{AccessToken: s.token}, nil
+}
+
+// PersistingTokenSource wraps a base TokenSource and writes refreshed tokens to disk.
+type PersistingTokenSource struct {
+	mu   sync.Mutex
+	Base oauth2.TokenSource
+	File string
+	last string
+}
+
+func NewPersistingTokenSource(base oauth2.TokenSource, file, lastToken string) *PersistingTokenSource {
+	return &PersistingTokenSource{Base: base, File: file, last: lastToken}
+}
+
+func (p *PersistingTokenSource) Token() (*oauth2.Token, error) {
+	tok, err := p.Base.Token()
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if tok.AccessToken != p.last {
+		if b, err := json.MarshalIndent(tok, "", "  "); err == nil {
+			os.WriteFile(p.File, b, 0600) //nolint:errcheck
+		}
+		p.last = tok.AccessToken
+	}
+	return tok, nil
 }
 
 func NewDriveClient(frontingIP, allowedSNI, accessToken string) *DriveClient {
+	c := NewClient(frontingIP, allowedSNI)
+	c.Timeout = 5 * time.Minute
 	return &DriveClient{
-		http:        NewClient(frontingIP, allowedSNI),
-		accessToken: accessToken,
+		http: c,
+		ts:   &staticTokenSource{token: accessToken},
 	}
+}
+
+// NewDriveClientWithSource creates a DriveClient that auto-refreshes tokens via ts.
+func NewDriveClientWithSource(frontingIP, allowedSNI string, ts oauth2.TokenSource) *DriveClient {
+	c := NewClient(frontingIP, allowedSNI)
+	c.Timeout = 5 * time.Minute
+	return &DriveClient{
+		http: c,
+		ts:   ts,
+	}
+}
+
+// SetTokenSource swaps the token source at runtime (e.g. after OAuth callback).
+func (d *DriveClient) SetTokenSource(ts oauth2.TokenSource) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ts = ts
+}
+
+// IsConnected reports whether a valid token is available.
+func (d *DriveClient) IsConnected() bool {
+	d.mu.RLock()
+	ts := d.ts
+	d.mu.RUnlock()
+	tok, err := ts.Token()
+	return err == nil && tok != nil && tok.AccessToken != ""
+}
+
+func (d *DriveClient) bearer() string {
+	d.mu.RLock()
+	ts := d.ts
+	d.mu.RUnlock()
+	tok, err := ts.Token()
+	if err != nil || tok == nil {
+		return ""
+	}
+	return tok.AccessToken
 }
 
 // UploadJSON creates a new JSON file in folderID. Returns the Drive file ID.
@@ -63,7 +146,7 @@ func (d *DriveClient) UploadJSON(ctx context.Context, folderID, name string, src
 		return "", err
 	}
 	req.Header.Set("Content-Type", "multipart/related; boundary="+mw.Boundary())
-	SetBearer(req, d.accessToken)
+	SetBearer(req, d.bearer())
 
 	resp, err := d.http.Do(req)
 	if err != nil {
@@ -107,7 +190,7 @@ func (d *DriveClient) ListByPrefix(ctx context.Context, folderID, prefix string)
 	if err != nil {
 		return nil, err
 	}
-	SetBearer(req, d.accessToken)
+	SetBearer(req, d.bearer())
 
 	resp, err := d.http.Do(req)
 	if err != nil {
@@ -136,7 +219,7 @@ func (d *DriveClient) Download(ctx context.Context, fileID string) (io.ReadClose
 	if err != nil {
 		return nil, 0, err
 	}
-	SetBearer(req, d.accessToken)
+	SetBearer(req, d.bearer())
 
 	resp, err := d.http.Do(req)
 	if err != nil {

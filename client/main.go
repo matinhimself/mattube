@@ -123,19 +123,28 @@ func serve(configPath string) {
 		}
 	}
 
-	// If a token file exists and DRIVE_ACCESS_TOKEN is not set, load it automatically
-	driveToken := cfg.DriveAccessToken
-	if driveToken == "" {
-		if tok, err := cli.LoadTokenFromFile("credentials.json", "drive_token.json"); err == nil {
-			driveToken = tok
-			log.Println("loaded Drive token from drive_token.json")
-		}
+	frontClient := fronting.NewClient(cfg.FrontingIP, cfg.AllowedSNI)
+
+	// Build a Drive client with auto-refreshing token when possible.
+	// All OAuth requests (token exchange, refresh) go through the fronting transport.
+	var driveClient *fronting.DriveClient
+	if cfg.DriveAccessToken != "" {
+		driveClient = fronting.NewDriveClient(cfg.FrontingIP, cfg.AllowedSNI, cfg.DriveAccessToken)
+		log.Println("Drive: using static access token from config (no auto-refresh)")
+	} else if ts, err := cli.LoadTokenSource(cfg.DriveCredsFile, cfg.DriveTokenFile, frontClient); err == nil {
+		log.Printf("Drive: token loaded from %s (creds: %s)", cfg.DriveTokenFile, cfg.DriveCredsFile)
+		driveClient = fronting.NewDriveClientWithSource(cfg.FrontingIP, cfg.AllowedSNI, ts)
+	} else {
+		log.Printf("Drive: no token found (%v) — connect via admin UI", err)
+		driveClient = fronting.NewDriveClient(cfg.FrontingIP, cfg.AllowedSNI, "")
 	}
-
-	driveClient := fronting.NewDriveClient(cfg.FrontingIP, cfg.AllowedSNI, driveToken)
+	if _, err := os.Stat(cfg.DriveCredsFile); err != nil {
+		log.Printf("Drive: credentials file not found at %s — OAuth connect will be unavailable", cfg.DriveCredsFile)
+	}
 	ytClient := fronting.NewYouTubeClient(cfg.FrontingIP, cfg.AllowedSNI, cfg.YouTubeAPIKey)
+	thumbCache := api.NewThumbCache(64<<20, 6*time.Hour)
 
-	apiServer := api.NewServer(database, driveClient, ytClient, cfg.DriveFolderID, cfg.LocalMode)
+	apiServer := api.NewServer(database, driveClient, ytClient, frontClient, thumbCache, cfg.DriveFolderID, cfg.LocalMode, cfg.DriveCredsFile, cfg.DriveTokenFile)
 
 	r := apiServer.Router()
 

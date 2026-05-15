@@ -16,6 +16,8 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+
+	"github.com/matinhimself/mattube/client/fronting"
 )
 
 const driveScope = "https://www.googleapis.com/auth/drive.file"
@@ -170,6 +172,43 @@ func LoadTokenFromFile(credentialsFile, tokenFile string) (string, error) {
 	}
 
 	return fresh.AccessToken, nil
+}
+
+// LoadTokenSource reads a saved token JSON and returns an auto-refreshing
+// oauth2.TokenSource. Refreshed tokens are persisted back to tokenFile.
+// httpClient is used for token refresh requests; pass nil to use http.DefaultClient.
+func LoadTokenSource(credentialsFile, tokenFile string, httpClient *http.Client) (oauth2.TokenSource, error) {
+	if credentialsFile == "" {
+		credentialsFile = "credentials.json"
+	}
+	if tokenFile == "" {
+		tokenFile = "drive_token.json"
+	}
+
+	creds, err := os.ReadFile(credentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("read credentials: %w", err)
+	}
+	cfg, err := google.ConfigFromJSON(creds, driveScope)
+	if err != nil {
+		return nil, fmt.Errorf("parse credentials: %w", err)
+	}
+
+	tokenJSON, err := os.ReadFile(tokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("read token file: %w (run 'get-drive-token' first)", err)
+	}
+	var token oauth2.Token
+	if err := json.Unmarshal(tokenJSON, &token); err != nil {
+		return nil, fmt.Errorf("parse token file: %w", err)
+	}
+
+	ctx := context.Background()
+	if httpClient != nil {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
+	}
+	base := cfg.TokenSource(ctx, &token)
+	return fronting.NewPersistingTokenSource(base, tokenFile, token.AccessToken), nil
 }
 
 // PrintTokenFromFile prints a fresh access token to stdout.

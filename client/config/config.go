@@ -16,6 +16,8 @@ type Config struct {
 	// Drive
 	DriveFolderID    string `json:"drive_folder_id"`
 	DriveAccessToken string `json:"drive_access_token"`
+	DriveCredsFile   string `json:"drive_creds_file"`
+	DriveTokenFile   string `json:"drive_token_file"`
 
 	// YouTube
 	YouTubeAPIKey string `json:"youtube_api_key"`
@@ -51,6 +53,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.DBPath == "" {
 		cfg.DBPath = "/var/lib/mattube/mattube-client.db"
+	}
+	if cfg.DriveCredsFile == "" {
+		cfg.DriveCredsFile = "/etc/mattube/credentials.json"
+	}
+	if cfg.DriveTokenFile == "" {
+		cfg.DriveTokenFile = "/etc/mattube/drive_token.json"
 	}
 	return &cfg, nil
 }

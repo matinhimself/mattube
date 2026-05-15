@@ -2,8 +2,48 @@
   import { api, type User } from '../api'
   import { auth } from '../lib/auth.svelte'
 
+  // --- Drive connection ---
+  let driveConnected = $state(false)
+  let driveCredsReady = $state(false)
+  let driveConnecting = $state(false)
+  const callbackURL = typeof window !== 'undefined'
+    ? window.location.origin + '/admin/drive/callback'
+    : ''
+
+  async function loadDriveStatus() {
+    try {
+      const s = await api.driveStatus()
+      driveConnected = s.connected
+      driveCredsReady = s.creds_ready
+    } catch {}
+  }
+
+  function connectDrive() {
+    driveConnecting = true
+    const popup = window.open(api.driveConnectUrl(), '_blank', 'width=600,height=700,noopener')
+
+    const onMsg = (e: MessageEvent) => {
+      if (e.data === 'drive-connected') {
+        cleanup()
+        loadDriveStatus()
+      }
+    }
+    window.addEventListener('message', onMsg)
+
+    const poll = setInterval(() => {
+      if (popup?.closed) { cleanup(); loadDriveStatus() }
+    }, 800)
+
+    function cleanup() {
+      clearInterval(poll)
+      window.removeEventListener('message', onMsg)
+      driveConnecting = false
+    }
+  }
+
+  // --- Users ---
   let users = $state<User[]>([])
-  let loading = $state(true)
+  let loading = $state(false)
   let error = $state('')
 
   let newUsername = $state('')
@@ -19,7 +59,10 @@
   let deleteTargetId = $state<number | null>(null)
   let deleting = $state(false)
 
-  $effect(() => { loadUsers() })
+  $effect(() => {
+    loadDriveStatus()
+    if (!auth.isLocalMode) loadUsers()
+  })
 
   async function loadUsers() {
     loading = true; error = ''
@@ -63,7 +106,67 @@
 </script>
 
 <div class="admin-page">
-  <h2 class="page-title">User Management</h2>
+  <h2 class="page-title">Admin</h2>
+
+  <!-- Google Drive connection -->
+  <div class="glass admin-section">
+    <h3 class="section-title">Google Drive</h3>
+    <div class="drive-row">
+      <div class="drive-status">
+        <span class="status-dot" class:connected={driveConnected}></span>
+        <span class="status-label">{driveConnected ? 'Connected' : 'Not connected'}</span>
+      </div>
+      {#if !driveConnected}
+        <button
+          class="btn-accent"
+          onclick={connectDrive}
+          disabled={driveConnecting || !driveCredsReady}
+          title={!driveCredsReady ? 'credentials.json not found on server' : ''}
+        >
+          {driveConnecting ? 'Waiting…' : 'Connect Google Drive'}
+        </button>
+      {:else}
+        <button class="btn-ghost drive-reconnect" onclick={connectDrive} disabled={driveConnecting}>
+          {driveConnecting ? 'Waiting…' : 'Reconnect'}
+        </button>
+      {/if}
+    </div>
+
+    {#if !driveConnected}
+      <div class="drive-tips">
+        {#if !driveCredsReady}
+          <p class="tip-warn">
+            <strong>credentials.json not found on server.</strong>
+            Download an OAuth 2.0 client credentials file (type: Desktop app) from
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>
+            and place it at <code>/etc/mattube/credentials.json</code> on the server.
+          </p>
+        {:else}
+          <p class="tip-title">Connect Google Drive</p>
+
+          <p class="tip-method-label">Option A — Server / CLI</p>
+          <div class="tip-alt">
+            Run on the server: <code>./mattube-client get-drive-token</code><br/>
+            Then copy the resulting <code>drive_token.json</code> to <code>/etc/mattube/</code> and reload this page.
+          </div>
+
+          <p class="tip-method-label" style="margin-top:14px">Option B — Browser popup</p>
+          <ol class="tips-list">
+            <li>
+              In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>,
+              open your OAuth 2.0 client and add this URL to <strong>Authorized redirect URIs</strong>:
+              <code class="tip-url">{callbackURL}</code>
+            </li>
+            <li>Click <em>Connect Google Drive</em> above — a popup walks you through authorization.</li>
+            <li>The token is saved automatically. No restart needed.</li>
+          </ol>
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  {#if !auth.isLocalMode}
+  <h2 class="page-title" style="margin-top:28px">User Management</h2>
 
   <!-- Create user -->
   <div class="glass admin-section">
@@ -129,6 +232,7 @@
       </div>
     </div>
   {/if}
+  {/if}
 </div>
 
 <!-- Reset password modal -->
@@ -174,6 +278,80 @@
 <style>
 .admin-page { max-width: 860px; }
 .page-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 20px; }
+
+/* Drive section */
+.drive-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.drive-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(224,48,48,0.6);
+  flex-shrink: 0;
+}
+.status-dot.connected { background: #3ecf5a; }
+.status-label { font-size: 0.875rem; color: var(--text-secondary); }
+.drive-reconnect { font-size: 0.78rem; padding: 5px 12px; }
+
+.drive-tips {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--glass-border);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.tip-warn {
+  background: rgba(224,48,48,0.07);
+  border: 1px solid rgba(224,48,48,0.2);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  color: var(--text-secondary);
+}
+.tip-warn strong { color: #e07070; }
+.tip-warn a, .drive-tips a { color: var(--accent); text-decoration: none; }
+.tip-warn a:hover, .drive-tips a:hover { text-decoration: underline; }
+.tip-title { font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.tip-method-label { font-weight: 600; color: var(--text-primary); margin-bottom: 6px; font-size: 0.8rem; }
+.tips-list {
+  padding-left: 18px;
+  margin: 0 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tip-url {
+  display: block;
+  margin-top: 4px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: #a0c4ff;
+  user-select: all;
+  word-break: break-all;
+}
+.tip-alt {
+  margin: 0;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.03);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+}
+.tip-alt code { color: #a0c4ff; font-size: 0.8rem; }
 .admin-section { padding: 20px 24px; margin-bottom: 16px; }
 .section-title {
   font-size: 0.75rem;

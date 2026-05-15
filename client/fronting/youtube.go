@@ -401,31 +401,65 @@ func (y *YouTubeClient) GetRelatedVideos(ctx context.Context, videoID string) ([
 	if err != nil {
 		return nil, err
 	}
+
 	secondary := walkPath(data, "contents", "twoColumnWatchNextResults",
 		"secondaryResults", "secondaryResults", "results")
+
 	var results []SearchResult
 	for _, item := range asList(secondary) {
-		vr, ok := asMap(item)["compactVideoRenderer"].(map[string]any)
-		if !ok {
+		m := asMap(item)
+
+		// Legacy renderer
+		if vr, ok := m["compactVideoRenderer"].(map[string]any); ok {
+			sr := SearchResult{
+				VideoID:     str(vr["videoId"]),
+				Title:       runText(vr["title"]),
+				ChannelName: runText(vr["longBylineText"]),
+				Duration:    str(walkPath(vr, "lengthText", "simpleText")),
+				ViewCount:   str(walkPath(vr, "viewCountText", "simpleText")),
+			}
+			if sr.ChannelName == "" {
+				sr.ChannelName = runText(vr["shortBylineText"])
+			}
+			if thumbs, ok := vr["thumbnail"].(map[string]any); ok {
+				if list := asList(thumbs["thumbnails"]); len(list) > 0 {
+					sr.Thumbnail = str(asMap(list[len(list)-1])["url"])
+				}
+			}
+			if sr.VideoID != "" {
+				results = append(results, sr)
+			}
 			continue
 		}
-		sr := SearchResult{
-			VideoID:     str(vr["videoId"]),
-			Title:       runText(vr["title"]),
-			ChannelName: runText(vr["longBylineText"]),
-			Duration:    str(walkPath(vr, "lengthText", "simpleText")),
-			ViewCount:   str(walkPath(vr, "viewCountText", "simpleText")),
-		}
-		if sr.ChannelName == "" {
-			sr.ChannelName = runText(vr["shortBylineText"])
-		}
-		if thumbs, ok := vr["thumbnail"].(map[string]any); ok {
-			if list := asList(thumbs["thumbnails"]); len(list) > 0 {
-				sr.Thumbnail = str(asMap(list[len(list)-1])["url"])
+
+		// Modern lockupViewModel renderer
+		if lvm, ok := m["lockupViewModel"].(map[string]any); ok {
+			if str(lvm["contentType"]) != "LOCKUP_CONTENT_TYPE_VIDEO" {
+				continue
 			}
-		}
-		if sr.VideoID != "" {
-			results = append(results, sr)
+			sr := SearchResult{VideoID: str(lvm["contentId"])}
+			if meta := asMap(walkPath(lvm, "metadata", "lockupMetadataViewModel")); meta != nil {
+				sr.Title = str(walkPath(meta, "title", "content"))
+				sr.ChannelID = str(walkPath(meta, "image", "decoratedAvatarViewModel",
+					"rendererContext", "commandContext", "onTap", "innertubeCommand",
+					"browseEndpoint", "browseId"))
+				rows := asList(walkPath(meta, "metadata", "contentMetadataViewModel", "metadataRows"))
+				if len(rows) > 0 {
+					sr.ChannelName = strings.TrimSpace(str(walkPath(asMap(rows[0]), "metadataParts", 0, "text", "content")))
+				}
+				if len(rows) > 1 {
+					sr.ViewCount = str(walkPath(asMap(rows[1]), "metadataParts", 0, "text", "content"))
+				}
+			}
+			sr.Duration = str(walkPath(lvm, "contentImage", "thumbnailViewModel",
+				"overlays", 0, "thumbnailBottomOverlayViewModel", "badges", 0,
+				"thumbnailBadgeViewModel", "text"))
+			if sources := asList(walkPath(lvm, "contentImage", "thumbnailViewModel", "image", "sources")); len(sources) > 0 {
+				sr.Thumbnail = str(asMap(sources[len(sources)-1])["url"])
+			}
+			if sr.VideoID != "" {
+				results = append(results, sr)
+			}
 		}
 	}
 	return results, nil
