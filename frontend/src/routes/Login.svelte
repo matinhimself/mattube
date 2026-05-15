@@ -8,6 +8,10 @@
   let error = $state('')
   let loading = $state(false)
 
+  $effect(() => {
+    if (!auth.loading && (auth.isLoggedIn || auth.isLocalMode)) navigate('/')
+  })
+
   async function submit(e: Event) {
     e.preventDefault()
     loading = true
@@ -15,7 +19,7 @@
     try {
       const user = await api.login(username, password)
       auth.setUser(user)
-      navigate('/')
+      window.location.href = '/'
     } catch (err: any) {
       error = err.message
     } finally {

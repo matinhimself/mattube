@@ -6,12 +6,12 @@
 
   $effect(() => {
     if (!auth.loading) {
-      if (!auth.isLoggedIn) navigate('/login')
+      if (!auth.isLoggedIn && !auth.isLocalMode) navigate('/login')
       else if (adminOnly && !auth.isAdmin) navigate('/')
     }
   })
 </script>
 
-{#if !auth.loading && auth.isLoggedIn && (!adminOnly || auth.isAdmin)}
+{#if !auth.loading && (auth.isLoggedIn || auth.isLocalMode) && (!adminOnly || auth.isAdmin)}
   {@render children()}
 {/if}

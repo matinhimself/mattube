@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -249,10 +250,13 @@ func (y *YouTubeClient) post(ctx context.Context, endpoint string, body map[stri
 	y.ensureVisitorData(ctx)
 	var lastErr error
 	for _, c := range knownClients {
+		log.Printf("[innertube] trying client=%s endpoint=%s", c.name, endpoint)
 		result, err := y.postWith(ctx, endpoint, body, c)
 		if err == nil {
+			log.Printf("[innertube] client=%s endpoint=%s ok", c.name, endpoint)
 			return result, nil
 		}
+		log.Printf("[innertube] client=%s endpoint=%s err: %v", c.name, endpoint, err)
 		lastErr = err
 	}
 	return nil, fmt.Errorf("innertube %s: all clients failed: %w", endpoint, lastErr)
@@ -324,17 +328,41 @@ type SearchResult struct {
 }
 
 func (y *YouTubeClient) Search(ctx context.Context, query string, n int) ([]SearchResult, error) {
+	log.Printf("[search] query=%q n=%d", query, n)
 	data, err := y.post(ctx, "search", map[string]any{"query": query})
 	if err != nil {
 		return nil, err
 	}
-	var results []SearchResult
+
+	// Log top-level keys to diagnose unexpected response shapes.
+	topKeys := make([]string, 0, len(data))
+	for k := range data {
+		topKeys = append(topKeys, k)
+	}
+	log.Printf("[search] response top-level keys: %v", topKeys)
+
 	// Try twoColumn layout (WEB client) first, fall back to direct sectionListRenderer.
 	contents := walkPath(data, "contents", "twoColumnSearchResultsRenderer",
 		"primaryContents", "sectionListRenderer", "contents")
-	if contents == nil {
+	if contents != nil {
+		log.Printf("[search] using twoColumnSearchResultsRenderer path")
+	} else {
 		contents = walkPath(data, "contents", "sectionListRenderer", "contents")
+		if contents != nil {
+			log.Printf("[search] using direct sectionListRenderer path")
+		} else {
+			log.Printf("[search] contents path not found — raw contents keys: %v", func() []string {
+				m, _ := data["contents"].(map[string]any)
+				keys := make([]string, 0, len(m))
+				for k := range m {
+					keys = append(keys, k)
+				}
+				return keys
+			}())
+		}
 	}
+
+	var results []SearchResult
 	for _, section := range asList(contents) {
 		items := walkPath(section, "itemSectionRenderer", "contents")
 		for _, item := range asList(items) {
@@ -355,12 +383,14 @@ func (y *YouTubeClient) Search(ctx context.Context, query string, n int) ([]Sear
 				if sr.VideoID != "" {
 					results = append(results, sr)
 					if len(results) >= n {
+						log.Printf("[search] done: %d results (hit limit)", len(results))
 						return results, nil
 					}
 				}
 			}
 		}
 	}
+	log.Printf("[search] done: %d results", len(results))
 	return results, nil
 }
 

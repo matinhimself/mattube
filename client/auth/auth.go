@@ -162,6 +162,17 @@ func CountUsers(db *sql.DB) (int, error) {
 
 type ctxKey = contextKey
 
+// LocalModeMiddleware injects a synthetic local admin user — used when local_mode is enabled.
+func LocalModeMiddleware() func(http.Handler) http.Handler {
+	local := &User{ID: 0, Username: "local", IsAdmin: true}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := context.WithValue(r.Context(), ctxKey{}, local)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 // RequireAuth is Chi middleware: validates session cookie, sets user in context.
 func RequireAuth(db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

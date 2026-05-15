@@ -52,47 +52,47 @@ func (c *jobCache) set(id string, s *JobStatus) {
 
 // Server holds all handler dependencies.
 type Server struct {
-	db       *sql.DB
-	drive    *fronting.DriveClient
-	yt       *fronting.YouTubeClient
-	folderID string
-	cache    *jobCache
+	db        *sql.DB
+	drive     *fronting.DriveClient
+	yt        *fronting.YouTubeClient
+	folderID  string
+	cache     *jobCache
+	localMode bool
 }
 
-func NewServer(db *sql.DB, dc *fronting.DriveClient, yt *fronting.YouTubeClient, folderID string) *Server {
-	return &Server{db: db, drive: dc, yt: yt, folderID: folderID, cache: newJobCache()}
+func NewServer(db *sql.DB, dc *fronting.DriveClient, yt *fronting.YouTubeClient, folderID string, localMode bool) *Server {
+	return &Server{db: db, drive: dc, yt: yt, folderID: folderID, cache: newJobCache(), localMode: localMode}
 }
 
-func (s *Server) Router() http.Handler {
+func (s *Server) Router() chi.Router {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// Auth endpoints (public)
 	r.Post("/auth/login", s.login)
 	r.Post("/auth/logout", s.logout)
 
-	// All API routes require auth
-	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireAuth(s.db))
+	requireAuth := auth.RequireAuth(s.db)
+	if s.localMode {
+		requireAuth = auth.LocalModeMiddleware()
+	}
 
-		// Current user
+	r.Group(func(r chi.Router) {
+		r.Use(requireAuth)
+
 		r.Get("/auth/me", s.me)
 
-		// YouTube discovery
 		r.Get("/api/search", s.search)
 		r.Get("/api/video/{videoId}", s.videoInfo)
 		r.Get("/api/video/{videoId}/captions", s.videoCaptions)
 		r.Get("/api/channel/{channelId}", s.channelInfo)
 		r.Get("/api/channel/{channelId}/videos", s.channelVideos)
 
-		// Jobs
 		r.Post("/api/jobs", s.submitJob)
 		r.Get("/api/jobs", s.listJobs)
 		r.Get("/api/jobs/{jobId}/status", s.jobStatus)
 		r.Get("/api/jobs/{jobId}/stream", s.streamJob)
 
-		// Admin
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAdmin)
 			r.Get("/admin/users", s.listUsers)
@@ -108,6 +108,10 @@ func (s *Server) Router() http.Handler {
 // --- Auth ---
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if s.localMode {
+		jsonOK(w, map[string]any{"id": 0, "username": "local", "is_admin": true, "last_login": nil, "local_mode": true})
+		return
+	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -128,6 +132,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		"username":   user.Username,
 		"is_admin":   user.IsAdmin,
 		"last_login": user.LastLogin,
+		"local_mode": false,
 	})
 }
 
@@ -138,10 +143,15 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		"username":   u.Username,
 		"is_admin":   u.IsAdmin,
 		"last_login": u.LastLogin,
+		"local_mode": s.localMode,
 	})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if s.localMode {
+		jsonOK(w, map[string]string{"status": "ok"})
+		return
+	}
 	if c, err := r.Cookie("session"); err == nil {
 		auth.Logout(s.db, c.Value) //nolint:errcheck
 	}
@@ -379,6 +389,26 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]string{"status": "ok"})
+}
+
+// --- Debug ---
+
+func (s *Server) DebugSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		jsonError(w, "q required", http.StatusBadRequest)
+		return
+	}
+	n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+	if n <= 0 || n > 50 {
+		n = 5
+	}
+	results, err := s.yt.Search(r.Context(), q, n)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	jsonOK(w, map[string]any{"count": len(results), "results": results})
 }
 
 // --- Helpers ---

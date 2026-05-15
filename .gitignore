@@ -6,6 +6,9 @@ client/static/dist/
 frontend/dist/
 node_modules/
 
+# Local config
+config.local.json
+
 # SQLite database
 *.db
 *.db-wal

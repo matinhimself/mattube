@@ -67,16 +67,18 @@
         {#if auth.isAdmin}
           <Link to="/admin/users" class="nav-link nav-link-admin">Admin</Link>
         {/if}
-        {#if auth.isLoggedIn}
-          <button class="btn-ghost navbar-signout" onclick={logout}>Sign out</button>
-        {:else if !auth.loading}
-          <Link to="/login" class="btn-accent nav-signin">Sign in</Link>
+        {#if !auth.isLocalMode}
+          {#if auth.isLoggedIn}
+            <button class="btn-ghost navbar-signout" onclick={logout}>Sign out</button>
+          {:else if !auth.loading}
+            <Link to="/login" class="btn-accent nav-signin">Sign in</Link>
+          {/if}
         {/if}
       </nav>
     </header>
 
     <main class="content">
-      <Route path="/login" component={Login} />
+      <Route path="/login"><Login /></Route>
 
       <Route path="/" let:params>
         <Guard><Home /></Guard>

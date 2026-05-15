@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/matinhimself/mattube/client/api"
 	"github.com/matinhimself/mattube/client/auth"
 	"github.com/matinhimself/mattube/client/cli"
@@ -111,15 +110,17 @@ func serve(configPath string) {
 	}
 	defer database.Close()
 
-	// Bootstrap: create admin if no users exist
-	if n, _ := auth.CountUsers(database); n == 0 {
-		if cfg.AdminUsername == "" || cfg.AdminPassword == "" {
-			log.Fatal("no users exist — run: go run . create-admin <username> <password>")
+	// Bootstrap: create admin if no users exist (skipped in local mode)
+	if !cfg.LocalMode {
+		if n, _ := auth.CountUsers(database); n == 0 {
+			if cfg.AdminUsername == "" || cfg.AdminPassword == "" {
+				log.Fatal("no users exist — run: go run . create-admin <username> <password>")
+			}
+			if _, err := auth.CreateUser(database, cfg.AdminUsername, cfg.AdminPassword, true); err != nil {
+				log.Fatalf("create admin: %v", err)
+			}
+			log.Printf("created admin user: %s", cfg.AdminUsername)
 		}
-		if _, err := auth.CreateUser(database, cfg.AdminUsername, cfg.AdminPassword, true); err != nil {
-			log.Fatalf("create admin: %v", err)
-		}
-		log.Printf("created admin user: %s", cfg.AdminUsername)
 	}
 
 	// If a token file exists and DRIVE_ACCESS_TOKEN is not set, load it automatically
@@ -134,19 +135,26 @@ func serve(configPath string) {
 	driveClient := fronting.NewDriveClient(cfg.FrontingIP, cfg.AllowedSNI, driveToken)
 	ytClient := fronting.NewYouTubeClient(cfg.FrontingIP, cfg.AllowedSNI, cfg.YouTubeAPIKey)
 
-	apiServer := api.NewServer(database, driveClient, ytClient, cfg.DriveFolderID)
+	apiServer := api.NewServer(database, driveClient, ytClient, cfg.DriveFolderID, cfg.LocalMode)
 
-	r := chi.NewRouter()
-	r.Mount("/", apiServer.Router())
+	r := apiServer.Router()
 
-	// Serve SPA with client-side routing fallback
+	// Debug: unauthenticated search test — remove before production
+	r.Get("/debug/search", apiServer.DebugSearch)
+
+	// Serve SPA only for paths the API router didn't claim.
 	dist, err := fs.Sub(staticFiles, "static/dist")
 	if err != nil {
 		log.Fatalf("embed sub: %v", err)
 	}
 	fileServer := http.FileServer(http.FS(dist))
-	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-		name := strings.TrimPrefix(req.URL.Path, "/")
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		p := req.URL.Path
+		if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/auth/") || strings.HasPrefix(p, "/admin/") {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		name := strings.TrimPrefix(p, "/")
 		if f, err := dist.Open(name); err != nil {
 			req.URL.Path = "/"
 		} else {

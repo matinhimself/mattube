@@ -29,6 +29,9 @@ type Config struct {
 	// Bootstrap admin (used only when users table is empty)
 	AdminUsername string `json:"admin_username"`
 	AdminPassword string `json:"admin_password"`
+
+	// LocalMode disables authentication entirely — useful for single-user local installs.
+	LocalMode bool `json:"local_mode"`
 }
 
 func Load(path string) (*Config, error) {

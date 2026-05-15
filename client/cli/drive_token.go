@@ -1,14 +1,17 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -77,6 +80,16 @@ func GetDriveToken(credentialsFile, tokenOutFile string) {
 	fmt.Println(" ", authURL)
 	fmt.Println()
 	openBrowser(authURL)
+
+	go func() {
+		fmt.Println("Or paste the redirect URL (or just the code) here for remote connections:")
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() {
+			if c := extractAuthCode(scanner.Text()); c != "" {
+				codeCh <- c
+			}
+		}
+	}()
 
 	fmt.Println("Waiting for authorization callback...")
 
@@ -166,6 +179,31 @@ func PrintTokenFromFile(credentialsFile, tokenFile string) {
 		fatalf("%v", err)
 	}
 	fmt.Println(token)
+}
+
+// extractAuthCode pulls the `code` query parameter out of a pasted redirect URL,
+// or returns the input as-is if it looks like a raw code.
+func extractAuthCode(input string) string {
+	s := strings.TrimSpace(input)
+	if s == "" {
+		return ""
+	}
+	if u, err := url.Parse(s); err == nil && u.Scheme != "" {
+		if c := u.Query().Get("code"); c != "" {
+			return c
+		}
+	}
+	if i := strings.Index(s, "code="); i >= 0 {
+		rest := s[i+len("code="):]
+		if j := strings.IndexAny(rest, "& "); j >= 0 {
+			rest = rest[:j]
+		}
+		if v, err := url.QueryUnescape(rest); err == nil {
+			return v
+		}
+		return rest
+	}
+	return s
 }
 
 func openBrowser(url string) {

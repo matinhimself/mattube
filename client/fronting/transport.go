@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -22,11 +23,16 @@ type Transport struct {
 }
 
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	log.Printf("[fronting] → %s %s  ip=%s sni=%s host=%s",
+		req.Method, req.URL.RequestURI(), t.FrontingIP, t.AllowedSNI, req.Host)
+
 	// Dial the fronting IP directly
 	conn, err := net.Dial("tcp", t.FrontingIP+":443")
 	if err != nil {
+		log.Printf("[fronting] dial error ip=%s: %v", t.FrontingIP, err)
 		return nil, fmt.Errorf("fronting dial %s: %w", t.FrontingIP, err)
 	}
+	log.Printf("[fronting] tcp connected local=%s remote=%s", conn.LocalAddr(), conn.RemoteAddr())
 
 	// TLS with spoofed SNI; skip cert verification (CDN cert won't match Host)
 	tlsConn := tls.Client(conn, &tls.Config{
@@ -35,8 +41,12 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	})
 	if err := tlsConn.Handshake(); err != nil {
 		conn.Close()
+		log.Printf("[fronting] tls handshake error sni=%s: %v", t.AllowedSNI, err)
 		return nil, fmt.Errorf("fronting tls handshake: %w", err)
 	}
+	cs := tlsConn.ConnectionState()
+	log.Printf("[fronting] tls ok sni=%s negotiated=%s cipher=0x%04x",
+		t.AllowedSNI, cs.NegotiatedProtocol, cs.CipherSuite)
 
 	// Write the HTTP request with the real Host header intact
 	if err := req.Write(tlsConn); err != nil {
@@ -49,6 +59,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		tlsConn.Close()
 		return nil, fmt.Errorf("fronting read response: %w", err)
 	}
+	log.Printf("[fronting] ← %d %s  host=%s", resp.StatusCode, resp.Status, req.Host)
 
 	// Wrap body to close the TLS connection when done
 	resp.Body = &connCloser{ReadCloser: resp.Body, conn: tlsConn}
