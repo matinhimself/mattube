@@ -94,7 +94,10 @@ func (m *Manager) worker(ctx context.Context, id int) {
 		case <-ctx.Done():
 			return
 		case req := <-m.queue:
+			log.Printf("worker %d: picked up job %s (%s)", id, req.JobID, req.URL)
+			start := time.Now()
 			m.processor.Process(ctx, req)
+			log.Printf("worker %d: finished job %s in %s", id, req.JobID, time.Since(start).Round(time.Second))
 			m.mu.Lock()
 			delete(m.seen, req.JobID)
 			m.mu.Unlock()

@@ -61,15 +61,23 @@ func (p *Processor) Process(ctx context.Context, req *Request) {
 	}
 
 	// Remux with faststart for iOS streaming
+	log.Printf("[%s] remuxing with faststart: %s", req.JobID, outPath)
 	outPath, err = remuxFaststart(ctx, outPath)
 	if err != nil {
 		log.Printf("[%s] warn: faststart remux failed, uploading original: %v", req.JobID, err)
+	} else {
+		log.Printf("[%s] remux done: %s", req.JobID, outPath)
+	}
+
+	if fi, err := os.Stat(outPath); err == nil {
+		log.Printf("[%s] upload file: %s size=%.2f MB", req.JobID, outPath, float64(fi.Size())/(1024*1024))
 	}
 
 	// Upload
 	p.updateStatus(ctx, statusFileID, req.JobID, StatusUploading, 0, "", "")
 	driveID, err := p.driveClient.UploadFile(ctx, p.outputFolder, outPath, "video/mp4")
 	if err != nil {
+		log.Printf("[%s] upload failed: %v", req.JobID, err)
 		p.updateStatus(ctx, statusFileID, req.JobID, StatusFailed, 0, "", fmt.Sprintf("upload: %v", err))
 		return
 	}
@@ -96,6 +104,7 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 	}
 	args = append(args, req.URL)
 
+	log.Printf("[%s] yt-dlp cmd: yt-dlp %s", req.JobID, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	cmd.Env = append(os.Environ())
 
@@ -110,9 +119,15 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 	}
 
 	pctRe := regexp.MustCompile(`(\d+(?:\.\d+)?)\%`)
+	var lastLines []string
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
+		log.Printf("[%s] yt-dlp: %s", req.JobID, line)
+		lastLines = append(lastLines, line)
+		if len(lastLines) > 20 {
+			lastLines = lastLines[1:]
+		}
 		if m := pctRe.FindStringSubmatch(line); m != nil {
 			if pct, err := strconv.ParseFloat(m[1], 64); err == nil {
 				progress(int(pct))
@@ -121,7 +136,8 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 	}
 
 	if err := cmd.Wait(); err != nil {
-		return "", fmt.Errorf("yt-dlp: %w", err)
+		tail := strings.Join(lastLines, "\n")
+		return "", fmt.Errorf("yt-dlp: %w\n%s", err, tail)
 	}
 
 	// Find the output file

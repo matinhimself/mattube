@@ -20,6 +20,7 @@ type Config struct {
 	MaxConcurrentJobs   int    `json:"max_concurrent_jobs"`
 	HTTPAddr            string `json:"http_addr"`
 	HTTPSProxy          string `json:"https_proxy"`
+	AdminPassword       string `json:"admin_password"`
 
 	// derived
 	PollInterval time.Duration `json:"-"`

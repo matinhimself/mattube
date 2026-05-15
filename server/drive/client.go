@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -79,6 +80,7 @@ func (p *persistTokenSource) Token() (*oauth2.Token, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if tok.AccessToken != p.last {
+		log.Printf("drive: token refreshed, persisting to %s", p.file)
 		if b, err := json.MarshalIndent(tok, "", "  "); err == nil {
 			os.WriteFile(p.file, b, 0600) //nolint:errcheck
 		}
@@ -159,6 +161,7 @@ func (c *Client) UploadFile(ctx context.Context, folderID, localPath, mimeType s
 		return "", err
 	}
 
+	log.Printf("drive: uploading %s (%.2f MB) to folder %s", stat.Name(), float64(stat.Size())/(1024*1024), folderID)
 	meta := &drive.File{
 		Name:    stat.Name(),
 		Parents: []string{folderID},
@@ -171,6 +174,7 @@ func (c *Client) UploadFile(ctx context.Context, folderID, localPath, mimeType s
 	if err != nil {
 		return "", fmt.Errorf("files.create (upload) %s: %w", localPath, err)
 	}
+	log.Printf("drive: uploaded %s → file_id=%s", stat.Name(), created.Id)
 
 	_, err = c.svc.Permissions.Create(created.Id, &drive.Permission{
 		Type: "anyone",

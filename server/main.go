@@ -83,7 +83,7 @@ func serve(configPath string) {
 	go pollDrive(ctx, driveClient, mgr, cfg)
 	go mgr.Start(ctx)
 
-	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: api.NewRouter()}
+	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: api.NewRouter(cfg.TokenFile, cfg.AdminPassword)}
 	go func() {
 		log.Printf("server listening on %s", cfg.HTTPAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -113,12 +113,15 @@ func pollDrive(ctx context.Context, dc *drive.Client, mgr *jobs.Manager, cfg *co
 				log.Printf("drive poll error: %v", err)
 				continue
 			}
+			log.Printf("drive poll: found %d request file(s)", len(files))
 			for _, f := range files {
+				log.Printf("drive poll: processing request file %s (%s)", f.Id, f.Name)
 				var req jobs.Request
 				if err := dc.DownloadJSON(ctx, f.Id, &req); err != nil {
 					log.Printf("download request file %s: %v", f.Id, err)
 					continue
 				}
+				log.Printf("drive poll: request %s url=%s quality=%s", req.JobID, req.URL, req.Quality)
 				if req.JobID == "" {
 					log.Printf("bad request file %s: missing job_id", f.Id)
 					dc.Delete(ctx, f.Id) //nolint:errcheck
