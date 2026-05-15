@@ -92,7 +92,10 @@ func runCommand(cmd string, args []string) {
 }
 
 func serve() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {

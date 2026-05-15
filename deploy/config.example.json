@@ -1,0 +1,22 @@
+{
+  "fronting_ip": "216.239.38.120",
+  "allowed_sni": "www.google.com",
+
+  "drive_folder_id": "YOUR_INPUT_FOLDER_ID",
+  "drive_output_folder_id": "YOUR_OUTPUT_FOLDER_ID",
+  "drive_access_token": "",
+
+  "youtube_api_key": "",
+
+  "credentials_file": "/etc/mattube/credentials.json",
+  "download_dir": "/tmp/mattube",
+  "poll_interval_s": 5,
+  "max_concurrent_jobs": 2,
+  "https_proxy": "socks5://127.0.0.1:10814",
+
+  "http_addr": ":8080",
+  "db_path": "/var/lib/mattube/mattube-client.db",
+
+  "admin_username": "admin",
+  "admin_password": "changeme"
+}

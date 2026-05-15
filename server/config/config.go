@@ -1,62 +1,55 @@
 package config
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
-	"strconv"
 	"time"
 )
 
+const Path = "/etc/mattube/config.json"
+
 type Config struct {
-	DriveFolderID       string
-	DriveOutputFolderID string
-	CredentialsFile     string
-	DownloadDir         string
-	PollInterval        time.Duration
-	MaxConcurrentJobs   int
-	HTTPAddr            string
-	HTTPSProxy          string // SOCKS5 proxy for yt-dlp
+	DriveFolderID       string `json:"drive_folder_id"`
+	DriveOutputFolderID string `json:"drive_output_folder_id"`
+	CredentialsFile     string `json:"credentials_file"`
+	DownloadDir         string `json:"download_dir"`
+	PollIntervalS       int    `json:"poll_interval_s"`
+	MaxConcurrentJobs   int    `json:"max_concurrent_jobs"`
+	HTTPAddr            string `json:"http_addr"`
+	HTTPSProxy          string `json:"https_proxy"`
+
+	// derived
+	PollInterval time.Duration `json:"-"`
 }
 
-func Load() *Config {
-	return &Config{
-		DriveFolderID:       mustEnv("DRIVE_FOLDER_ID"),
-		DriveOutputFolderID: mustEnv("DRIVE_OUTPUT_FOLDER_ID"),
-		CredentialsFile:     getEnv("GOOGLE_CREDENTIALS_FILE", "credentials.json"),
-		DownloadDir:         getEnv("DOWNLOAD_DIR", "/tmp/mattube"),
-		PollInterval:        parseDuration(getEnv("POLL_INTERVAL_S", "5"), time.Second),
-		MaxConcurrentJobs:   parseInt(getEnv("MAX_CONCURRENT_JOBS", "2")),
-		HTTPAddr:            getEnv("HTTP_ADDR", ":8081"),
-		HTTPSProxy:          getEnv("HTTPS_PROXY", "socks5://127.0.0.1:10814"),
+func Load() (*Config, error) {
+	data, err := os.ReadFile(Path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", Path, err)
 	}
-}
-
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		panic("required env var not set: " + key)
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", Path, err)
 	}
-	return v
-}
-
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+	if cfg.CredentialsFile == "" {
+		cfg.CredentialsFile = "/etc/mattube/credentials.json"
 	}
-	return fallback
-}
-
-func parseDuration(s string, unit time.Duration) time.Duration {
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
-		return 5 * time.Second
+	if cfg.DownloadDir == "" {
+		cfg.DownloadDir = "/tmp/mattube"
 	}
-	return time.Duration(n) * unit
-}
-
-func parseInt(s string) int {
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
-		return 2
+	if cfg.PollIntervalS <= 0 {
+		cfg.PollIntervalS = 5
 	}
-	return n
+	if cfg.MaxConcurrentJobs <= 0 {
+		cfg.MaxConcurrentJobs = 2
+	}
+	if cfg.HTTPAddr == "" {
+		cfg.HTTPAddr = ":8081"
+	}
+	if cfg.HTTPSProxy == "" {
+		cfg.HTTPSProxy = "socks5://127.0.0.1:10814"
+	}
+	cfg.PollInterval = time.Duration(cfg.PollIntervalS) * time.Second
+	return &cfg, nil
 }

@@ -1,57 +1,50 @@
 package config
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 )
 
+const Path = "/etc/mattube/config.json"
+
 type Config struct {
 	// Fronting
-	FrontingIP string
-	AllowedSNI string
+	FrontingIP string `json:"fronting_ip"`
+	AllowedSNI string `json:"allowed_sni"`
 
 	// Drive
-	DriveFolderID   string
-	DriveAccessToken string // OAuth token for Drive access
+	DriveFolderID    string `json:"drive_folder_id"`
+	DriveAccessToken string `json:"drive_access_token"`
 
 	// YouTube
-	YouTubeAPIKey string // optional InnerTube API key
+	YouTubeAPIKey string `json:"youtube_api_key"`
 
 	// HTTP
-	HTTPAddr string
+	HTTPAddr string `json:"http_addr"`
 
 	// DB
-	DBPath string
+	DBPath string `json:"db_path"`
 
 	// Bootstrap admin (used only when users table is empty)
-	AdminUsername string
-	AdminPassword string
+	AdminUsername string `json:"admin_username"`
+	AdminPassword string `json:"admin_password"`
 }
 
-func Load() *Config {
-	return &Config{
-		FrontingIP:      mustEnv("FRONTING_IP"),
-		AllowedSNI:      mustEnv("ALLOWED_SNI"),
-		DriveFolderID:   mustEnv("DRIVE_FOLDER_ID"),
-		DriveAccessToken: getEnv("DRIVE_ACCESS_TOKEN", ""),
-		YouTubeAPIKey:   getEnv("YOUTUBE_API_KEY", ""),
-		HTTPAddr:        getEnv("HTTP_ADDR", ":8080"),
-		DBPath:          getEnv("DB_PATH", "./mattube-client.db"),
-		AdminUsername:   getEnv("ADMIN_USERNAME", ""),
-		AdminPassword:   getEnv("ADMIN_PASSWORD", ""),
+func Load() (*Config, error) {
+	data, err := os.ReadFile(Path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", Path, err)
 	}
-}
-
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		panic("required env var not set: " + key)
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", Path, err)
 	}
-	return v
-}
-
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+	if cfg.HTTPAddr == "" {
+		cfg.HTTPAddr = ":8080"
 	}
-	return fallback
+	if cfg.DBPath == "" {
+		cfg.DBPath = "/var/lib/mattube/mattube-client.db"
+	}
+	return &cfg, nil
 }
