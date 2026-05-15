@@ -11,6 +11,14 @@ contents:
     dst: /usr/bin/mattube-server
     file_info:
       mode: 0755
+  - src: bin/yt-dlp
+    dst: /usr/local/bin/yt-dlp
+    file_info:
+      mode: 0755
+  - src: bin/ffmpeg
+    dst: /usr/local/bin/ffmpeg
+    file_info:
+      mode: 0755
   - src: deploy/mattube-server.service
     dst: /lib/systemd/system/mattube-server.service
 

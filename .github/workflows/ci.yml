@@ -174,6 +174,19 @@ jobs:
             echo "VERSION=0.0.0+$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
           fi
 
+      - name: Download yt-dlp and ffmpeg for server deb
+        run: |
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+            FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl.tar.xz"
+          else
+            YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"
+            FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
+          fi
+          curl -sSL "$YTDLP_URL" -o bin/yt-dlp
+          curl -sSL "$FFMPEG_URL" | tar -xJ --strip-components=2 -C bin/ --wildcards '*/bin/ffmpeg'
+          chmod 755 bin/yt-dlp bin/ffmpeg
+
       - name: Build .deb packages
         run: |
           mkdir -p dist
