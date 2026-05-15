@@ -60,6 +60,12 @@ func (p *Processor) Process(ctx context.Context, req *Request) {
 		return
 	}
 
+	// Remux with faststart for iOS streaming
+	outPath, err = remuxFaststart(ctx, outPath)
+	if err != nil {
+		log.Printf("[%s] warn: faststart remux failed, uploading original: %v", req.JobID, err)
+	}
+
 	// Upload
 	p.updateStatus(ctx, statusFileID, req.JobID, StatusUploading, 0, "", "")
 	driveID, err := p.driveClient.UploadFile(ctx, p.outputFolder, outPath, "video/mp4")
@@ -129,6 +135,17 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 		}
 	}
 	return "", fmt.Errorf("no .mp4 found in %s after download", jobDir)
+}
+
+func remuxFaststart(ctx context.Context, input string) (string, error) {
+	out := strings.TrimSuffix(input, ".mp4") + "_fs.mp4"
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-i", input,
+		"-c", "copy", "-movflags", "+faststart", out)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		return input, fmt.Errorf("%w: %s", err, b)
+	}
+	os.Remove(input)
+	return out, nil
 }
 
 func ytdlpFormat(quality string) string {
