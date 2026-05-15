@@ -1,0 +1,28 @@
+# Binaries
+bin/
+
+# Frontend build output (embedded into client binary)
+client/static/dist/
+frontend/dist/
+node_modules/
+
+# SQLite database
+*.db
+*.db-wal
+*.db-shm
+
+# Credentials — never commit these
+credentials.json
+drive_token.json
+*.pem
+*.key
+
+# Environment files
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

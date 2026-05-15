@@ -1,0 +1,27 @@
+[Unit]
+Description=mattube client (web + API)
+After=network.target
+
+[Service]
+Type=simple
+User=mattube
+WorkingDirectory=/opt/mattube
+ExecStart=/opt/mattube/bin/mattube-client
+Restart=on-failure
+RestartSec=5
+
+# Required
+Environment=FRONTING_IP=
+Environment=ALLOWED_SNI=
+Environment=DRIVE_FOLDER_ID=
+
+# Optional overrides
+Environment=HTTP_ADDR=:8080
+Environment=DB_PATH=/opt/mattube/data/mattube-client.db
+# Environment=ADMIN_USERNAME=admin
+# Environment=ADMIN_PASSWORD=changeme
+# Environment=DRIVE_ACCESS_TOKEN=
+# Environment=YOUTUBE_API_KEY=
+
+[Install]
+WantedBy=multi-user.target

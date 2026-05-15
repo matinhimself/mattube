@@ -1,0 +1,103 @@
+name: CI / Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Frontend ──────────────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
+      # ── Go (client + server share the same toolchain) ─────────────────────────
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: client/go.mod
+          cache-dependency-path: |
+            client/go.sum
+            server/go.sum
+
+      - name: Build mattube-client
+        run: go build -o ../bin/mattube-client .
+        working-directory: client
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+
+      - name: Build mattube-server
+        run: go build -o ../bin/mattube-server .
+        working-directory: server
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+          retention-days: 7
+
+  deploy:
+    name: Deploy — ${{ matrix.name }}
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server-1
+            host_secret: SERVER1_HOST
+          - name: server-2
+            host_secret: SERVER2_HOST
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets[matrix.host_secret] }}" >> ~/.ssh/known_hosts
+
+      - name: Upload binaries
+        run: |
+          HOST="${{ secrets[matrix.host_secret] }}"
+          USER="${{ secrets.SSH_USER }}"
+          scp -i ~/.ssh/deploy_key bin/mattube-client bin/mattube-server \
+            "${USER}@${HOST}:/opt/mattube/bin/"
+
+      - name: Restart services
+        run: |
+          HOST="${{ secrets[matrix.host_secret] }}"
+          USER="${{ secrets.SSH_USER }}"
+          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
+            "sudo systemctl restart mattube-client mattube-server"

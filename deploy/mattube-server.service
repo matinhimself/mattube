@@ -1,0 +1,26 @@
+[Unit]
+Description=mattube server (Drive poller + job processor)
+After=network.target
+
+[Service]
+Type=simple
+User=mattube
+WorkingDirectory=/opt/mattube
+ExecStart=/opt/mattube/bin/mattube-server
+Restart=on-failure
+RestartSec=5
+
+# Required
+Environment=DRIVE_FOLDER_ID=
+Environment=DRIVE_OUTPUT_FOLDER_ID=
+
+# Optional overrides
+Environment=GOOGLE_CREDENTIALS_FILE=/opt/mattube/credentials.json
+Environment=DOWNLOAD_DIR=/tmp/mattube
+Environment=HTTP_ADDR=:8081
+Environment=MAX_CONCURRENT_JOBS=2
+# Environment=POLL_INTERVAL_S=5
+# Environment=HTTPS_PROXY=socks5://127.0.0.1:10814
+
+[Install]
+WantedBy=multi-user.target
