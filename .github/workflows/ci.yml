@@ -2,10 +2,7 @@ name: CI / Release
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
-  pull_request:
-    branches: [main]
 
 jobs:
   # ── Frontend (built once, shared across all platform builds) ─────────────────
@@ -32,49 +29,10 @@ jobs:
           name: frontend-dist
           path: client/static/dist/
 
-  # ── Go binary smoke build (normal commits / PRs) ─────────────────────────────
-  build-ci:
-    name: Build Linux amd64
-    needs: frontend
-    if: "!startsWith(github.ref, 'refs/tags/')"
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: client/static/dist/
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: client/go.mod
-          cache-dependency-path: |
-            client/go.sum
-            server/go.sum
-
-      - name: Build mattube-client
-        run: mkdir -p ../bin && go build -o ../bin/mattube-client .
-        working-directory: client
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
-
-      - name: Build mattube-server
-        run: go build -o ../bin/mattube-server .
-        working-directory: server
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
-
   # ── Go binaries (cross-compiled for release tags only) ───────────────────────
   build-release:
     name: Release build ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: frontend
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -131,7 +89,6 @@ jobs:
   package-deb:
     name: Package .deb (${{ matrix.goarch }})
     needs: build-release
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -202,7 +159,6 @@ jobs:
   release:
     name: GitHub Release
     needs: [build-release, package-deb]
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
