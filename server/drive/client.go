@@ -7,21 +7,84 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 )
+
+const driveScope = "https://www.googleapis.com/auth/drive.file"
 
 type Client struct {
 	svc *drive.Service
 }
 
-func New(ctx context.Context, credentialsFile string) (*Client, error) {
-	svc, err := drive.NewService(ctx, option.WithCredentialsFile(credentialsFile))
+// New creates a Drive client using OAuth2 user credentials.
+// If accessToken is non-empty it is used directly (no file needed).
+// Otherwise tokenFile is loaded and auto-refreshed via credentialsFile.
+func New(ctx context.Context, credentialsFile, tokenFile, accessToken string) (*Client, error) {
+	ts, err := newTokenSource(ctx, credentialsFile, tokenFile, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	svc, err := drive.NewService(ctx, option.WithTokenSource(ts))
 	if err != nil {
 		return nil, fmt.Errorf("drive.NewService: %w", err)
 	}
 	return &Client{svc: svc}, nil
+}
+
+func newTokenSource(ctx context.Context, credentialsFile, tokenFile, accessToken string) (oauth2.TokenSource, error) {
+	creds, err := os.ReadFile(credentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("read credentials: %w", err)
+	}
+	cfg, err := google.ConfigFromJSON(creds, driveScope)
+	if err != nil {
+		return nil, fmt.Errorf("parse credentials: %w", err)
+	}
+
+	var tok oauth2.Token
+	if accessToken != "" {
+		tok = oauth2.Token{AccessToken: accessToken}
+	} else {
+		data, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("read token file: %w (run 'get-drive-token' first)", err)
+		}
+		if err := json.Unmarshal(data, &tok); err != nil {
+			return nil, fmt.Errorf("parse token file: %w", err)
+		}
+	}
+
+	base := cfg.TokenSource(ctx, &tok)
+	return &persistTokenSource{base: base, file: tokenFile, last: tok.AccessToken}, nil
+}
+
+// persistTokenSource writes the token back to disk whenever it is refreshed.
+type persistTokenSource struct {
+	mu   sync.Mutex
+	base oauth2.TokenSource
+	file string
+	last string
+}
+
+func (p *persistTokenSource) Token() (*oauth2.Token, error) {
+	tok, err := p.base.Token()
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if tok.AccessToken != p.last {
+		if b, err := json.MarshalIndent(tok, "", "  "); err == nil {
+			os.WriteFile(p.file, b, 0600) //nolint:errcheck
+		}
+		p.last = tok.AccessToken
+	}
+	return tok, nil
 }
 
 // ListByPrefix returns files in folderID whose names start with prefix.
@@ -109,7 +172,6 @@ func (c *Client) UploadFile(ctx context.Context, folderID, localPath, mimeType s
 		return "", fmt.Errorf("files.create (upload) %s: %w", localPath, err)
 	}
 
-	// Make publicly readable so client can stream without service account auth
 	_, err = c.svc.Permissions.Create(created.Id, &drive.Permission{
 		Type: "anyone",
 		Role: "reader",

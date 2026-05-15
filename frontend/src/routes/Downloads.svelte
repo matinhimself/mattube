@@ -6,73 +6,105 @@
   let error = $state('')
 
   $effect(() => {
-    api.listJobs()
-      .then(j => { jobs = j; loading = false })
-      .catch(e => { error = e.message; loading = false })
+    refresh()
+    const timer = setInterval(refresh, 5000)
+    return () => clearInterval(timer)
   })
 
-  function statusColor(s: JobStatus['status']) {
-    if (s === 'done') return '#27ae60'
-    if (s === 'failed') return '#e74c3c'
-    return '#2b8fcc'
+  async function refresh() {
+    try {
+      jobs = await api.listJobs()
+    } catch (e: any) {
+      error = e.message
+    } finally {
+      loading = false
+    }
+  }
+
+  function statusChip(s: JobStatus['status']) {
+    if (s === 'done') return 'chip-done'
+    if (s === 'failed') return 'chip-failed'
+    return 'chip-active'
   }
 </script>
 
-<h2 class="title">Downloads</h2>
+<div class="downloads-page">
+  <div class="page-header">
+    <h2 class="page-title">Downloads</h2>
+    {#if jobs.length > 0}
+      <span class="job-count">{jobs.length} job{jobs.length === 1 ? '' : 's'}</span>
+    {/if}
+  </div>
 
-{#if loading}
-  <div class="loading">Loading...</div>
-{:else if error}
-  <div class="error">{error}</div>
-{:else if jobs.length === 0}
-  <div class="empty">No downloads yet.</div>
-{:else}
-  <div class="job-list">
-    {#each jobs as job}
-      <div class="job-row">
-        <div class="job-id">{job.job_id}</div>
-        <div class="job-bar">
-          {#if job.status === 'downloading' || job.status === 'uploading'}
-            <div class="progress-bar">
-              <div class="progress-fill" style="width:{job.progress}%"></div>
-            </div>
+  {#if loading}
+    <div class="state-msg"><div class="spinner"></div></div>
+  {:else if error}
+    <div class="state-msg error">{error}</div>
+  {:else if jobs.length === 0}
+    <div class="state-msg">No downloads yet. Visit a video page to start one.</div>
+  {:else}
+    <div class="job-list">
+      {#each jobs as job}
+        <div class="job-row glass">
+          <div class="job-id">{job.job_id}</div>
+          <div class="job-bar">
+            {#if job.status === 'downloading' || job.status === 'uploading'}
+              <div class="progress-bar">
+                <div class="progress-fill" style="width:{job.progress}%"></div>
+              </div>
+            {/if}
+          </div>
+          <span class="chip {statusChip(job.status)}">
+            {job.status}{job.progress && job.status !== 'done' ? ` ${job.progress}%` : ''}
+          </span>
+          {#if job.status === 'done' && job.drive_file_id}
+            <a href={`/api/jobs/${job.job_id}/stream`} class="btn-ghost dl-btn" download>↓ Save</a>
           {/if}
         </div>
-        <div class="job-status" style="color:{statusColor(job.status)}">
-          {job.status}{job.progress && job.status !== 'done' ? ` ${job.progress}%` : ''}
-        </div>
-        {#if job.status === 'done' && job.drive_file_id}
-          <a href={`/api/jobs/${job.job_id}/stream`} class="dl-link" download>⬇ Save</a>
-        {/if}
-      </div>
-    {/each}
-  </div>
-{/if}
+      {/each}
+    </div>
+  {/if}
+</div>
 
 <style>
-.title { margin-bottom: 16px; font-size: 1.1em; }
-.loading, .error, .empty { padding: 40px; text-align: center; color: #aab8c2; }
-.error { color: #e74c3c; }
+.downloads-page { max-width: 860px; }
+.page-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.page-title { font-size: 1.2rem; font-weight: 600; }
+.job-count { font-size: 0.82rem; color: var(--text-secondary); }
+
 .job-list { display: flex; flex-direction: column; gap: 8px; }
 .job-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  background: #17212b;
-  padding: 10px 14px;
-  border-radius: 8px;
+  gap: 14px;
+  padding: 12px 16px;
+  transition: border-color var(--t-fast);
 }
-.job-id { font-family: monospace; font-size: 0.82em; color: #aab8c2; min-width: 80px; }
+.job-row:hover { border-color: rgba(255,255,255,0.13); }
+.job-id {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  min-width: 90px;
+  flex-shrink: 0;
+}
 .job-bar { flex: 1; }
-.progress-bar { height: 5px; background: #2b3a4a; border-radius: 3px; overflow: hidden; }
-.progress-fill { height: 100%; background: #2b8fcc; transition: width 0.3s; }
-.job-status { font-size: 0.82em; min-width: 80px; text-align: right; }
-.dl-link {
-  font-size: 0.82em;
-  padding: 4px 10px;
-  background: #2b3a4a;
-  border-radius: 6px;
-  color: #aab8c2;
-  white-space: nowrap;
+.progress-bar {
+  height: 4px;
+  background: var(--glass-bg-hover);
+  border-radius: 2px;
+  overflow: hidden;
 }
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  transition: width 0.4s ease;
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+.dl-btn { font-size: 0.8rem; padding: 5px 12px; }
 </style>

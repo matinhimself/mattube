@@ -68,125 +68,119 @@
 </script>
 
 {#if loading}
-  <div class="loading">Loading...</div>
+  <div class="state-msg"><div class="spinner"></div></div>
 {:else if error}
-  <div class="error">{error}</div>
+  <div class="state-msg error">{error}</div>
 {:else if info}
   <div class="video-page">
 
-    <div class="meta">
-      <h1>{info.title}</h1>
-      <div class="sub-meta">
+    <div class="meta glass">
+      <h1 class="meta-title">{info.title}</h1>
+      <div class="meta-row">
         {#if info.channel_name}
-          <Link to={`/channel/${info.channel_id}`} class="channel-link">{info.channel_name}</Link>
+          <Link to={`/channel/${info.channel_id}`} class="meta-channel">{info.channel_name}</Link>
         {/if}
         {#if info.duration}
-          <span class="dim">{fmtDuration(info.duration)}</span>
+          <span class="meta-sep">·</span>
+          <span class="meta-dim">{fmtDuration(info.duration)}</span>
         {/if}
         {#if info.view_count}
-          <span class="dim">{info.view_count} views</span>
+          <span class="meta-sep">·</span>
+          <span class="meta-dim">{info.view_count} views</span>
         {/if}
       </div>
     </div>
 
     {#if info.thumbnail}
-      <img src={info.thumbnail} alt={info.title} class="thumbnail" />
+      <div class="thumb-wrap glass">
+        <img src={info.thumbnail} alt={info.title} class="thumb" />
+      </div>
     {/if}
 
-    <!-- Download / play controls -->
-    <div class="actions">
-      <select bind:value={selectedQuality} class="quality-select">
+    <div class="actions glass">
+      <select bind:value={selectedQuality} class="select-base">
         {#each QUALITIES as q}
           <option value={q}>{q}</option>
         {/each}
       </select>
 
       {#if !jobStatus}
-        <button onclick={download} disabled={submitting} class="btn-primary">
-          {submitting ? 'Submitting...' : '⬇ Download'}
+        <button onclick={download} disabled={submitting} class="btn-accent">
+          {submitting ? 'Submitting…' : '↓ Download'}
         </button>
       {:else}
         <div class="job-status">
           {#if jobStatus.status === 'done'}
             <button onclick={play} class="btn-play">▶ Play</button>
-            <span class="status-done">✓ Ready</span>
+            <span class="chip chip-done">Ready</span>
           {:else if jobStatus.status === 'failed'}
-            <span class="status-failed">✗ {jobStatus.error || 'Failed'}</span>
+            <span class="chip chip-failed">{jobStatus.error || 'Failed'}</span>
           {:else}
-            <div class="progress-bar">
-              <div class="progress-fill" style="width:{jobStatus.progress}%"></div>
+            <div class="progress-wrap">
+              <div class="progress-bar">
+                <div class="progress-fill" style="width:{jobStatus.progress}%"></div>
+              </div>
+              <span class="chip chip-active">{jobStatus.status} {jobStatus.progress}%</span>
             </div>
-            <span class="status-label">{jobStatus.status} {jobStatus.progress}%</span>
           {/if}
         </div>
       {/if}
 
-      <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" class="btn-yt">
+      <a href={`https://www.youtube.com/watch?v=${videoId}`} target="_blank" class="btn-ghost">
         ↗ YouTube
       </a>
     </div>
 
     {#if info.description}
-      <div class="description">{info.description}</div>
+      <div class="description glass">{info.description}</div>
     {/if}
 
   </div>
 {/if}
 
 <style>
-.loading, .error { padding: 40px; text-align: center; color: #aab8c2; }
-.error { color: #e74c3c; }
-.video-page { max-width: 720px; }
-h1 { font-size: 1.2em; margin-bottom: 8px; line-height: 1.4; }
-.sub-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; font-size: 0.82em; }
-.dim { color: #aab8c2; }
-:global(.channel-link) { color: #6ab2f2 !important; }
-.thumbnail { width: 100%; border-radius: 10px; margin-bottom: 16px; }
-.actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
-.quality-select {
-  padding: 8px 12px;
-  background: #17212b;
-  border: 1.5px solid #2b3a4a;
-  border-radius: 8px;
-  color: #e8e8e8;
-}
-.btn-primary, .btn-play {
-  padding: 8px 18px;
-  background: #2b8fcc;
-  border: none;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 0.9em;
-  cursor: pointer;
-}
-.btn-primary:disabled { opacity: 0.6; cursor: default; }
-.btn-play { background: #27ae60; }
-.btn-yt {
-  padding: 8px 14px;
-  background: #17212b;
-  border: 1.5px solid #2b3a4a;
-  border-radius: 8px;
-  color: #aab8c2;
-  font-size: 0.85em;
+.video-page { max-width: 720px; display: flex; flex-direction: column; gap: 14px; }
+
+.meta { padding: 18px 20px; }
+.meta-title { font-size: 1.15rem; font-weight: 600; line-height: 1.4; margin-bottom: 10px; }
+.meta-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+:global(.meta-channel) { color: var(--accent) !important; font-size: 0.85rem; font-weight: 500; }
+.meta-sep { color: var(--text-muted); }
+.meta-dim { color: var(--text-secondary); font-size: 0.82rem; }
+
+.thumb-wrap { overflow: hidden; aspect-ratio: 16/9; padding: 0; }
+.thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 14px 16px;
 }
 .job-status { display: flex; align-items: center; gap: 10px; }
+.progress-wrap { display: flex; align-items: center; gap: 10px; }
 .progress-bar {
-  width: 120px; height: 6px;
-  background: #2b3a4a;
+  width: 120px;
+  height: 5px;
+  background: var(--glass-bg-hover);
   border-radius: 3px;
   overflow: hidden;
 }
-.progress-fill { height: 100%; background: #2b8fcc; transition: width 0.4s; }
-.status-label { font-size: 0.8em; color: #aab8c2; }
-.status-done { color: #27ae60; font-size: 0.85em; }
-.status-failed { color: #e74c3c; font-size: 0.85em; }
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  transition: width 0.4s ease;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
 .description {
-  font-size: 0.82em;
-  color: #aab8c2;
-  line-height: 1.6;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.65;
   white-space: pre-wrap;
-  background: #17212b;
-  padding: 12px;
-  border-radius: 8px;
+  padding: 16px 20px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 </style>

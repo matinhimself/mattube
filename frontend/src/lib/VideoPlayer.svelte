@@ -42,7 +42,6 @@
       }
     })
 
-    // Touch hold right half for 2× speed
     const vjsEl = el.closest('.video-js') as HTMLElement
     if (vjsEl) {
       let holdTimer: ReturnType<typeof setTimeout>
@@ -85,10 +84,9 @@
     playsinline
     style="width:100%"
   ></video>
-  <button class="minimize-btn" onclick={() => player.minimize()}>▼</button>
+  <button class="minimize-btn glass" onclick={() => player.minimize()}>↙ Minimize</button>
 </div>
 {:else}
-<!-- Video element always in DOM so Video.js can initialize -->
 <video
   bind:this={el}
   id="vjs-player"
@@ -107,8 +105,8 @@
     <div class="mini-title">{player.currentTrack.title}</div>
     <div class="mini-channel">{player.currentTrack.channelName}</div>
   </div>
-  <button onclick={() => player.togglePlay()} class="mini-btn">{player.playing ? '⏸' : '▶'}</button>
-  <button onclick={() => player.expand()} class="mini-btn">⤢</button>
+  <button onclick={() => player.togglePlay()} class="mini-ctrl">{player.playing ? '⏸' : '▶'}</button>
+  <button onclick={() => player.expand()} class="mini-ctrl mini-ctrl-expand">⤢</button>
 </div>
 {/if}
 
@@ -124,40 +122,60 @@
 }
 .minimize-btn {
   position: absolute;
-  top: 12px;
-  right: 16px;
-  background: rgba(0,0,0,0.6);
-  border: none;
-  color: #fff;
-  font-size: 1.2rem;
+  top: 14px;
+  right: 18px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-family: inherit;
   cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 6px;
+  color: var(--text-secondary);
+  border-color: var(--glass-border);
   z-index: 101;
+  transition: color var(--t-fast), border-color var(--t-fast);
 }
+.minimize-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+
 .mini-player {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 64px;
-  background: #17212b;
-  border-top: 1px solid #2b3a4a;
+  height: 68px;
+  background: rgba(8, 8, 8, 0.90);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--glass-border);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 12px;
+  gap: 12px;
+  padding: 0 16px;
   z-index: 99;
 }
-.mini-thumb { width: 48px; height: 36px; object-fit: cover; border-radius: 4px; }
+.mini-thumb {
+  width: 52px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
 .mini-info { flex: 1; overflow: hidden; }
 .mini-title {
-  font-size: 0.82em;
-  color: #e8e8e8;
+  font-size: 0.82rem;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.mini-channel { font-size: 0.72em; color: #6ab2f2; }
-.mini-btn { background: none; border: none; color: #aab8c2; font-size: 1.2rem; cursor: pointer; padding: 6px; }
+.mini-channel { font-size: 0.72rem; color: var(--accent); margin-top: 2px; }
+.mini-ctrl {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 8px;
+  transition: color var(--t-fast);
+}
+.mini-ctrl:hover { color: var(--text-primary); }
+.mini-ctrl-expand:hover { color: var(--accent); }
 </style>

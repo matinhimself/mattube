@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,11 +27,15 @@ import (
 var staticFiles embed.FS
 
 func main() {
-	if len(os.Args) > 1 {
-		runCommand(os.Args[1], os.Args[2:])
+	configPath, configProvided, args, err := parseGlobalFlags(os.Args[1:])
+	if err != nil {
+		fatalf("%v\n\n%s", err, usage())
+	}
+	if len(args) > 0 {
+		runCommand(args[0], args[1:], configPath, configProvided)
 		return
 	}
-	serve()
+	serve(configPath)
 }
 
 // runCommand dispatches CLI subcommands.
@@ -42,13 +47,16 @@ func main() {
 //	go run . get-drive-token [credentials.json] [token_out.json]
 //	go run . print-drive-token [credentials.json] [token.json]
 //	go run . test-fronting <fronting-ip> <allowed-sni>
-func runCommand(cmd string, args []string) {
+func runCommand(cmd string, args []string, configPath string, configProvided bool) {
 	switch cmd {
+	case "serve":
+		serve(configPath)
+
 	case "create-admin":
 		if len(args) < 2 {
 			fatalf("usage: create-admin <username> <password>")
 		}
-		database := mustOpenDB()
+		database := mustOpenDB(configPath, configProvided)
 		defer database.Close()
 		cli.CreateUser(database, args[0], args[1], true)
 
@@ -56,12 +64,12 @@ func runCommand(cmd string, args []string) {
 		if len(args) < 2 {
 			fatalf("usage: create-user <username> <password>")
 		}
-		database := mustOpenDB()
+		database := mustOpenDB(configPath, configProvided)
 		defer database.Close()
 		cli.CreateUser(database, args[0], args[1], false)
 
 	case "list-users":
-		database := mustOpenDB()
+		database := mustOpenDB(configPath, configProvided)
 		defer database.Close()
 		cli.ListUsers(database)
 
@@ -91,8 +99,8 @@ func runCommand(cmd string, args []string) {
 	}
 }
 
-func serve() {
-	cfg, err := config.Load()
+func serve(configPath string) {
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -138,8 +146,11 @@ func serve() {
 	}
 	fileServer := http.FileServer(http.FS(dist))
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-		if _, err := dist.(fs.StatFS).Stat(req.URL.Path[1:]); err != nil {
+		name := strings.TrimPrefix(req.URL.Path, "/")
+		if f, err := dist.Open(name); err != nil {
 			req.URL.Path = "/"
+		} else {
+			f.Close()
 		}
 		fileServer.ServeHTTP(w, req)
 	})
@@ -162,10 +173,16 @@ func serve() {
 	srv.Shutdown(shutCtx) //nolint:errcheck
 }
 
-func mustOpenDB() *sql.DB {
+func mustOpenDB(configPath string, configProvided bool) *sql.DB {
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
-		dbPath = "./mattube-client.db"
+		if cfg, err := config.Load(configPath); err == nil && cfg.DBPath != "" {
+			dbPath = cfg.DBPath
+		} else if configProvided {
+			log.Fatalf("config: %v", err)
+		} else {
+			dbPath = "./mattube-client.db"
+		}
 	}
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -181,6 +198,32 @@ func argOr(args []string, i int, fallback string) string {
 	return fallback
 }
 
+func parseGlobalFlags(args []string) (string, bool, []string, error) {
+	configPath := config.DefaultPath
+	configProvided := false
+	remaining := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-c", "--config":
+			if i+1 >= len(args) {
+				return "", false, nil, fmt.Errorf("%s requires a path", args[i])
+			}
+			configPath = args[i+1]
+			configProvided = true
+			i++
+		default:
+			const configPrefix = "--config="
+			if len(args[i]) > len(configPrefix) && args[i][:len(configPrefix)] == configPrefix {
+				configPath = args[i][len(configPrefix):]
+				configProvided = true
+				continue
+			}
+			remaining = append(remaining, args[i])
+		}
+	}
+	return configPath, configProvided, remaining, nil
+}
+
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
@@ -188,6 +231,7 @@ func fatalf(format string, args ...any) {
 
 func usage() string {
 	return `Commands:
+  -c, --config <path>                    Config file path (default /etc/mattube/config.json)
   serve                                  Start the web server (default)
   create-admin  <username> <password>    Create an admin user
   create-user   <username> <password>    Create a regular user

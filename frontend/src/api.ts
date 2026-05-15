@@ -1,3 +1,10 @@
+export interface User {
+  id: number
+  username: string
+  is_admin: boolean
+  last_login: string | null
+}
+
 export interface VideoInfo {
   video_id: string
   title: string
@@ -46,7 +53,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  login: (username: string, password: string) =>
+  login: (username: string, password: string): Promise<User> =>
     request('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -54,6 +61,8 @@ export const api = {
     }),
 
   logout: () => request('/auth/logout', { method: 'POST' }),
+
+  getCurrentUser: (): Promise<User> => request('/auth/me'),
 
   search: (q: string, n = 20): Promise<SearchResult[]> =>
     request(`/api/search?q=${encodeURIComponent(q)}&n=${n}`),
@@ -81,4 +90,24 @@ export const api = {
     request('/api/jobs'),
 
   streamUrl: (jobId: string) => `/api/jobs/${jobId}/stream`,
+
+  listUsers: (): Promise<User[]> =>
+    request('/admin/users'),
+
+  createUser: (username: string, password: string, is_admin = false): Promise<User> =>
+    request('/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, is_admin }),
+    }),
+
+  resetPassword: (userId: number, password: string): Promise<void> =>
+    request(`/admin/users/${userId}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    }),
+
+  deleteUser: (userId: number): Promise<void> =>
+    request(`/admin/users/${userId}`, { method: 'DELETE' }),
 }

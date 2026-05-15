@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { navigate } from 'svelte-routing'
   import { api } from '../api'
+  import { auth } from '../lib/auth.svelte'
 
   let username = $state('')
   let password = $state('')
@@ -11,8 +13,9 @@
     loading = true
     error = ''
     try {
-      await api.login(username, password)
-      window.location.href = '/'
+      const user = await api.login(username, password)
+      auth.setUser(user)
+      navigate('/')
     } catch (err: any) {
       error = err.message
     } finally {
@@ -22,21 +25,37 @@
 </script>
 
 <div class="login-wrap">
-  <div class="login-card">
-    <h1>mattube</h1>
+  <div class="login-card glass">
+    <div class="login-logo">matt<span class="logo-accent">ube</span></div>
+    <p class="login-sub">Sign in to your account</p>
+
     <form onsubmit={submit}>
       <div class="field">
-        <label for="username">Username</label>
-        <input id="username" type="text" bind:value={username} autocomplete="username" required />
+        <label for="username" class="field-label">Username</label>
+        <input
+          id="username"
+          type="text"
+          class="input-base"
+          bind:value={username}
+          autocomplete="username"
+          required
+        />
       </div>
       <div class="field">
-        <label for="password">Password</label>
-        <input id="password" type="password" bind:value={password} autocomplete="current-password" required />
+        <label for="password" class="field-label">Password</label>
+        <input
+          id="password"
+          type="password"
+          class="input-base"
+          bind:value={password}
+          autocomplete="current-password"
+          required
+        />
       </div>
       {#if error}
-        <div class="error">{error}</div>
+        <div class="login-error">{error}</div>
       {/if}
-      <button type="submit" disabled={loading} class="submit-btn">
+      <button type="submit" disabled={loading} class="btn-accent submit-btn">
         {loading ? 'Signing in...' : 'Sign in'}
       </button>
     </form>
@@ -48,40 +67,44 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 70vh;
+  min-height: calc(100vh - 58px);
+  padding: 40px 16px;
 }
 .login-card {
-  background: #17212b;
-  padding: 32px;
-  border-radius: 14px;
   width: 100%;
-  max-width: 340px;
-  border: 1px solid #2b3a4a;
+  max-width: 360px;
+  padding: 36px 32px;
+  box-shadow: 0 0 80px rgba(224,48,48,0.10), 0 0 1px rgba(224,48,48,0.2);
 }
-h1 { text-align: center; margin-bottom: 24px; color: #6ab2f2; }
-.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
-label { font-size: 0.82em; color: #aab8c2; }
-input {
-  padding: 9px 12px;
-  background: #0e1621;
-  border: 1.5px solid #2b3a4a;
-  border-radius: 8px;
-  color: #e8e8e8;
-  font-size: 0.9em;
-  outline: none;
+.login-logo {
+  text-align: center;
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
 }
-input:focus { border-color: #6ab2f2; }
-.error { color: #e74c3c; font-size: 0.82em; margin-bottom: 10px; }
+.logo-accent { color: var(--accent); }
+.login-sub {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-bottom: 28px;
+}
+.field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
+.field-label { font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); }
+.login-error {
+  font-size: 0.82rem;
+  color: var(--accent-hover);
+  background: rgba(224,48,48,0.1);
+  border: 1px solid rgba(224,48,48,0.25);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
 .submit-btn {
   width: 100%;
-  padding: 10px;
-  background: #2b8fcc;
-  border: none;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 0.95em;
-  cursor: pointer;
+  justify-content: center;
   margin-top: 4px;
 }
-.submit-btn:disabled { opacity: 0.6; cursor: default; }
 </style>

@@ -118,27 +118,73 @@ type CaptionSegment struct {
 }
 
 // GetCaptions returns transcript segments for the given video and language code.
-// Pass lang="" to use the video's default language.
+// Pass lang="" to use the video's default language (first available track).
 func (y *YouTubeClient) GetCaptions(ctx context.Context, videoID, lang string) ([]CaptionSegment, error) {
-	if lang == "" {
-		lang = "en"
-	}
 	video, err := y.kkdai.GetVideoContext(ctx, videoID)
 	if err != nil {
 		return nil, err
 	}
-	transcript, err := y.kkdai.GetTranscriptCtx(ctx, video, lang)
+	if len(video.CaptionTracks) == 0 {
+		return nil, nil
+	}
+
+	// Pick the best matching track.
+	track := video.CaptionTracks[0]
+	if lang != "" {
+		for _, t := range video.CaptionTracks {
+			if strings.HasPrefix(t.LanguageCode, lang) {
+				track = t
+				break
+			}
+		}
+	}
+
+	// Fetch timedtext as JSON3. BaseURL already has fmt=srv3; replace it.
+	u := strings.ReplaceAll(track.BaseURL, "fmt=srv3", "fmt=json3")
+	if !strings.Contains(u, "fmt=") {
+		u += "&fmt=json3"
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]CaptionSegment, len(transcript))
-	for i, s := range transcript {
-		out[i] = CaptionSegment{
-			Text:       s.Text,
-			StartMs:    s.StartMs,
-			DurationMs: s.Duration,
-			OffsetText: s.OffsetText,
+	resp, err := y.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("captions: status %d", resp.StatusCode)
+	}
+
+	var j3 struct {
+		Events []struct {
+			TStartMs    int `json:"tStartMs"`
+			DDurationMs int `json:"dDurationMs"`
+			Segs        []struct {
+				Utf8 string `json:"utf8"`
+			} `json:"segs"`
+		} `json:"events"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&j3); err != nil {
+		return nil, err
+	}
+
+	var out []CaptionSegment
+	for _, ev := range j3.Events {
+		var text strings.Builder
+		for _, seg := range ev.Segs {
+			text.WriteString(seg.Utf8)
 		}
+		t := strings.TrimSpace(text.String())
+		if t == "" || t == "\n" {
+			continue
+		}
+		out = append(out, CaptionSegment{
+			Text:       t,
+			StartMs:    ev.TStartMs,
+			DurationMs: ev.DDurationMs,
+		})
 	}
 	return out, nil
 }

@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=mattube
 WorkingDirectory=/opt/mattube
-ExecStart=/usr/bin/mattube-client
+ExecStart=/usr/bin/mattube-client -c /etc/mattube/config.json
 Restart=on-failure
 RestartSec=5
 

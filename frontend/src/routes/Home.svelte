@@ -2,7 +2,6 @@
   import { api, type SearchResult } from '../api'
   import VideoCard from '../lib/VideoCard.svelte'
 
-  // Read query from URL
   const params = new URLSearchParams(window.location.search)
   let query = $state(params.get('q') || '')
   let results = $state<SearchResult[]>([])
@@ -22,15 +21,18 @@
 
 {#if !query}
   <div class="hero">
-    <h1>Search YouTube</h1>
-    <p>Enter a query in the search bar above to discover videos and channels.</p>
+    <h1 class="hero-title">Find & Download <span class="hero-accent">Anything</span></h1>
+    <p class="hero-sub">Search YouTube, download at any quality, stream instantly.</p>
   </div>
 {:else if loading}
-  <div class="loading">Searching...</div>
+  <div class="state-msg">
+    <div class="spinner"></div>
+    <p>Searching for "{query}"…</p>
+  </div>
 {:else if error}
-  <div class="error">{error}</div>
+  <div class="state-msg error">{error}</div>
 {:else if results.length === 0}
-  <div class="empty">No results for "{query}"</div>
+  <div class="state-msg">No results for "{query}"</div>
 {:else}
   <div class="results-grid">
     {#each results as r}
@@ -40,10 +42,28 @@
 {/if}
 
 <style>
-.hero { text-align: center; padding: 60px 0; color: #aab8c2; }
-.hero h1 { font-size: 1.8em; color: #e8e8e8; margin-bottom: 8px; }
-.loading, .error, .empty { padding: 40px; text-align: center; color: #aab8c2; }
-.error { color: #e74c3c; }
+.hero {
+  text-align: center;
+  padding: 80px 20px 60px;
+}
+.hero-title {
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+  line-height: 1.15;
+}
+.hero-accent {
+  color: var(--accent);
+  text-shadow: 0 0 40px rgba(224,48,48,0.45);
+}
+.hero-sub {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  max-width: 420px;
+  margin: 0 auto;
+}
 .results-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

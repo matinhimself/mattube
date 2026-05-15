@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-const Path = "/etc/mattube/config.json"
+const DefaultPath = "/etc/mattube/config.json"
 
 type Config struct {
 	// Fronting
@@ -31,14 +31,17 @@ type Config struct {
 	AdminPassword string `json:"admin_password"`
 }
 
-func Load() (*Config, error) {
-	data, err := os.ReadFile(Path)
+func Load(path string) (*Config, error) {
+	if path == "" {
+		path = DefaultPath
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", Path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", Path, err)
+		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = ":8080"

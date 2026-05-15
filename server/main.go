@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,13 +11,50 @@ import (
 	"time"
 
 	"github.com/matinhimself/mattube/server/api"
+	"github.com/matinhimself/mattube/server/cli"
 	"github.com/matinhimself/mattube/server/config"
 	"github.com/matinhimself/mattube/server/drive"
 	"github.com/matinhimself/mattube/server/jobs"
 )
 
 func main() {
-	cfg, err := config.Load()
+	configPath, args, err := parseGlobalFlags(os.Args[1:])
+	if err != nil {
+		fatalf("%v\n\n%s", err, usage())
+	}
+	if len(args) > 0 {
+		runCommand(args[0], args[1:], configPath)
+		return
+	}
+	serve(configPath)
+}
+
+// runCommand dispatches CLI subcommands.
+//
+//	go run . get-drive-token [credentials.json] [token_out.json]
+//	go run . print-drive-token [credentials.json] [token.json]
+func runCommand(cmd string, args []string, configPath string) {
+	switch cmd {
+	case "serve":
+		serve(configPath)
+
+	case "get-drive-token":
+		creds := argOr(args, 0, "/etc/mattube/credentials.json")
+		out := argOr(args, 1, "/etc/mattube/drive_token.json")
+		cli.GetDriveToken(creds, out)
+
+	case "print-drive-token":
+		creds := argOr(args, 0, "/etc/mattube/credentials.json")
+		tok := argOr(args, 1, "/etc/mattube/drive_token.json")
+		cli.PrintTokenFromFile(creds, tok)
+
+	default:
+		fatalf("unknown command %q\n\n%s", cmd, usage())
+	}
+}
+
+func serve(configPath string) {
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -28,7 +66,7 @@ func main() {
 		log.Fatalf("mkdir download dir: %v", err)
 	}
 
-	driveClient, err := drive.New(ctx, cfg.CredentialsFile)
+	driveClient, err := drive.New(ctx, cfg.CredentialsFile, cfg.TokenFile, cfg.DriveAccessToken)
 	if err != nil {
 		log.Fatalf("drive client: %v", err)
 	}
@@ -42,13 +80,9 @@ func main() {
 	)
 	mgr := jobs.NewManager(cfg.MaxConcurrentJobs, proc)
 
-	// Drive poller goroutine
 	go pollDrive(ctx, driveClient, mgr, cfg)
-
-	// Worker pool
 	go mgr.Start(ctx)
 
-	// HTTP admin server
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: api.NewRouter()}
 	go func() {
 		log.Printf("server listening on %s", cfg.HTTPAddr)
@@ -90,7 +124,6 @@ func pollDrive(ctx context.Context, dc *drive.Client, mgr *jobs.Manager, cfg *co
 					dc.Delete(ctx, f.Id) //nolint:errcheck
 					continue
 				}
-				// Delete before enqueue to avoid re-processing on next poll
 				if err := dc.Delete(ctx, f.Id); err != nil {
 					log.Printf("delete request file %s: %v", f.Id, err)
 				}
@@ -98,4 +131,47 @@ func pollDrive(ctx context.Context, dc *drive.Client, mgr *jobs.Manager, cfg *co
 			}
 		}
 	}
+}
+
+func parseGlobalFlags(args []string) (string, []string, error) {
+	configPath := config.DefaultPath
+	remaining := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-c", "--config":
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("%s requires a path", args[i])
+			}
+			configPath = args[i+1]
+			i++
+		default:
+			const configPrefix = "--config="
+			if len(args[i]) > len(configPrefix) && args[i][:len(configPrefix)] == configPrefix {
+				configPath = args[i][len(configPrefix):]
+				continue
+			}
+			remaining = append(remaining, args[i])
+		}
+	}
+	return configPath, remaining, nil
+}
+
+func argOr(args []string, i int, fallback string) string {
+	if i < len(args) && args[i] != "" {
+		return args[i]
+	}
+	return fallback
+}
+
+func fatalf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
+
+func usage() string {
+	return `Commands:
+  -c, --config <path>                         Config file path (default /etc/mattube/config.json)
+  serve                                        Start the server (default)
+  get-drive-token   [creds.json] [out.json]   Run OAuth flow, save Drive token
+  print-drive-token [creds.json] [tok.json]   Print a fresh access token`
 }

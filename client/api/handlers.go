@@ -76,6 +76,9 @@ func (s *Server) Router() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth(s.db))
 
+		// Current user
+		r.Get("/auth/me", s.me)
+
 		// YouTube discovery
 		r.Get("/api/search", s.search)
 		r.Get("/api/video/{videoId}", s.videoInfo)
@@ -119,7 +122,23 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.SetSessionCookie(w, token)
-	jsonOK(w, map[string]string{"status": "ok"})
+	user, _ := auth.Validate(s.db, token)
+	jsonOK(w, map[string]any{
+		"id":         user.ID,
+		"username":   user.Username,
+		"is_admin":   user.IsAdmin,
+		"last_login": user.LastLogin,
+	})
+}
+
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	jsonOK(w, map[string]any{
+		"id":         u.ID,
+		"username":   u.Username,
+		"is_admin":   u.IsAdmin,
+		"last_login": u.LastLogin,
+	})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
