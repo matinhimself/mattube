@@ -68,7 +68,7 @@ jobs:
             server/go.sum
 
       - name: Build mattube-client
-        run: go build -o ../../bin/mattube-client${{ matrix.ext }} .
+        run: mkdir -p ../bin && go build -o ../bin/mattube-client${{ matrix.ext }} .
         working-directory: client
         env:
           CGO_ENABLED: 0
@@ -76,7 +76,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
 
       - name: Build mattube-server
-        run: go build -o ../../bin/mattube-server${{ matrix.ext }} .
+        run: go build -o ../bin/mattube-server${{ matrix.ext }} .
         working-directory: server
         env:
           CGO_ENABLED: 0
