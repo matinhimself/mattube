@@ -1,4 +1,4 @@
-name: CI / Release / Deploy
+name: CI / Release
 
 on:
   push:
@@ -176,41 +176,3 @@ jobs:
         with:
           files: release/*
           generate_release_notes: true
-
-  # ── Deploy to servers (push to main → linux/amd64) ────────────────────────────
-  deploy:
-    name: Deploy — ${{ matrix.name }}
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: server-1
-            host_secret: SERVER1_HOST
-          - name: server-2
-            host_secret: SERVER2_HOST
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: binaries-linux-amd64
-          path: bin/
-
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets[matrix.host_secret] }}" >> ~/.ssh/known_hosts
-
-      - name: Upload binaries
-        run: |
-          scp -i ~/.ssh/deploy_key bin/mattube-client bin/mattube-server \
-            "${{ secrets.SSH_USER }}@${{ secrets[matrix.host_secret] }}:/opt/mattube/bin/"
-
-      - name: Restart services
-        run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.SSH_USER }}@${{ secrets[matrix.host_secret] }}" \
-            "sudo systemctl restart mattube-client mattube-server"
