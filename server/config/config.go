@@ -19,7 +19,6 @@ type Config struct {
 	PollIntervalS       int    `json:"poll_interval_s"`
 	MaxConcurrentJobs   int    `json:"max_concurrent_jobs"`
 	HTTPAddr            string `json:"http_addr"`
-	HTTPSProxy          string `json:"https_proxy"`
 	AdminPassword       string `json:"admin_password"`
 
 	// derived
@@ -55,9 +54,6 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = ":8081"
-	}
-	if cfg.HTTPSProxy == "" {
-		cfg.HTTPSProxy = "socks5://127.0.0.1:10814"
 	}
 	cfg.PollInterval = time.Duration(cfg.PollIntervalS) * time.Second
 	return &cfg, nil

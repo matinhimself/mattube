@@ -22,16 +22,14 @@ type Processor struct {
 	outputFolder  string // Drive folder ID for finished videos
 	statusFolder  string // Drive folder ID for status files (same as job folder)
 	downloadDir   string // local temp base dir
-	httpsProxy    string // SOCKS5 proxy for yt-dlp
 }
 
-func NewProcessor(dc *drive.Client, outputFolder, statusFolder, downloadDir, httpsProxy string) *Processor {
+func NewProcessor(dc *drive.Client, outputFolder, statusFolder, downloadDir string) *Processor {
 	return &Processor{
 		driveClient:  dc,
 		outputFolder: outputFolder,
 		statusFolder: statusFolder,
 		downloadDir:  downloadDir,
-		httpsProxy:   httpsProxy,
 	}
 }
 
@@ -98,9 +96,6 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 		"--no-playlist",
 		"--progress",
 		"--newline",
-	}
-	if p.httpsProxy != "" {
-		args = append(args, "--proxy", p.httpsProxy)
 	}
 	args = append(args, req.URL)
 

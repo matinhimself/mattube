@@ -76,7 +76,6 @@ func serve(configPath string) {
 		cfg.DriveOutputFolderID,
 		cfg.DriveFolderID,
 		cfg.DownloadDir,
-		cfg.HTTPSProxy,
 	)
 	mgr := jobs.NewManager(cfg.MaxConcurrentJobs, proc)
 
