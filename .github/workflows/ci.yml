@@ -109,10 +109,22 @@ jobs:
           name: binaries-linux-${{ matrix.goarch }}
           path: bin/
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: client/go.mod
+          cache-dependency-path: |
+            client/go.sum
+            server/go.sum
+
       - name: Install nfpm
+        env:
+          NFPM_VERSION: v2.46.3
         run: |
-          curl -sfL https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_Linux_x86_64.tar.gz \
-            | tar -xz -C /usr/local/bin nfpm
+          mkdir -p "$RUNNER_TEMP/bin"
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/goreleaser/nfpm/v2/cmd/nfpm@"$NFPM_VERSION"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          nfpm --version
 
       - name: Determine version
         run: |
