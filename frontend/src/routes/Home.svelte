@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { useLocation } from 'svelte-routing'
   import { api, type SearchResult } from '../api'
   import VideoCard from '../lib/VideoCard.svelte'
+
+  const location = useLocation()
 
   let query = $state(new URLSearchParams(window.location.search).get('q') || '')
   let results = $state<SearchResult[]>([])
@@ -9,11 +12,9 @@
   let error = $state('')
 
   onMount(() => {
-    function onNav() {
-      query = new URLSearchParams(window.location.search).get('q') || ''
-    }
-    window.addEventListener('popstate', onNav)
-    return () => window.removeEventListener('popstate', onNav)
+    return location.subscribe(loc => {
+      query = new URLSearchParams(loc?.search || '').get('q') || ''
+    })
   })
 
   $effect(() => {
