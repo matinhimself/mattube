@@ -1,35 +1,65 @@
-name: CI / Deploy
+name: CI / Release / Deploy
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
 jobs:
-  build:
-    name: Build
+  # ── Frontend (built once, shared across all platform builds) ─────────────────
+  frontend:
+    name: Build Frontend
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      - run: npm run build
+        working-directory: frontend
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: client/static/dist/
+
+  # ── Go binaries (cross-compiled for all platforms) ────────────────────────────
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: frontend
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: .exe
 
     steps:
       - uses: actions/checkout@v4
 
-      # ── Frontend ──────────────────────────────────────────────────────────────
-      - uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          name: frontend-dist
+          path: client/static/dist/
 
-      - name: Install frontend deps
-        run: npm ci
-        working-directory: frontend
-
-      - name: Build frontend
-        run: npm run build
-        working-directory: frontend
-
-      # ── Go (client + server share the same toolchain) ─────────────────────────
       - uses: actions/setup-go@v5
         with:
           go-version-file: client/go.mod
@@ -38,34 +68,121 @@ jobs:
             server/go.sum
 
       - name: Build mattube-client
-        run: go build -o ../bin/mattube-client .
+        run: go build -o ../../bin/mattube-client${{ matrix.ext }} .
         working-directory: client
         env:
           CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
 
       - name: Build mattube-server
-        run: go build -o ../bin/mattube-server .
+        run: go build -o ../../bin/mattube-server${{ matrix.ext }} .
         working-directory: server
         env:
           CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
 
-      - name: Upload binaries
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: binaries
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/
-          retention-days: 7
 
+  # ── .deb packages (linux only) ────────────────────────────────────────────────
+  package-deb:
+    name: Package .deb (${{ matrix.goarch }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            deb_arch: amd64
+          - goarch: arm64
+            deb_arch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries-linux-${{ matrix.goarch }}
+          path: bin/
+
+      - name: Install nfpm
+        run: |
+          curl -sfL https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_linux_amd64.tar.gz \
+            | tar -xz -C /usr/local/bin nfpm
+
+      - name: Determine version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=0.0.0+$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build .deb packages
+        run: |
+          mkdir -p dist
+          ARCH=${{ matrix.deb_arch }} nfpm package -f deploy/nfpm-client.yaml -p deb -t dist/
+          ARCH=${{ matrix.deb_arch }} nfpm package -f deploy/nfpm-server.yaml -p deb -t dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-${{ matrix.goarch }}
+          path: dist/
+
+  # ── GitHub Release (on version tags) ──────────────────────────────────────────
+  release:
+    name: GitHub Release
+    needs: [build, package-deb]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: artifacts/
+          merge-multiple: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          path: debs/
+          merge-multiple: false
+
+      - name: Collect and rename release assets
+        run: |
+          mkdir release
+          for dir in artifacts/*/; do
+            os_arch="${dir#artifacts/binaries-}"  # e.g. linux-amd64/
+            os_arch="${os_arch%/}"
+            for f in "$dir"*; do
+              fname=$(basename "$f")
+              if [[ "$fname" == *.exe ]]; then
+                cp "$f" "release/${fname%.exe}-${os_arch}.exe"
+              else
+                cp "$f" "release/${fname}-${os_arch}"
+              fi
+            done
+          done
+          find debs/ -name "*.deb" -exec cp {} release/ \;
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+
+  # ── Deploy to servers (push to main → linux/amd64) ────────────────────────────
   deploy:
     name: Deploy — ${{ matrix.name }}
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +195,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: binaries
+          name: binaries-linux-amd64
           path: bin/
 
       - name: Set up SSH
@@ -90,14 +207,10 @@ jobs:
 
       - name: Upload binaries
         run: |
-          HOST="${{ secrets[matrix.host_secret] }}"
-          USER="${{ secrets.SSH_USER }}"
           scp -i ~/.ssh/deploy_key bin/mattube-client bin/mattube-server \
-            "${USER}@${HOST}:/opt/mattube/bin/"
+            "${{ secrets.SSH_USER }}@${{ secrets[matrix.host_secret] }}:/opt/mattube/bin/"
 
       - name: Restart services
         run: |
-          HOST="${{ secrets[matrix.host_secret] }}"
-          USER="${{ secrets.SSH_USER }}"
-          ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" \
+          ssh -i ~/.ssh/deploy_key "${{ secrets.SSH_USER }}@${{ secrets[matrix.host_secret] }}" \
             "sudo systemctl restart mattube-client mattube-server"

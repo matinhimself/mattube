@@ -1,0 +1,19 @@
+name: mattube-server
+arch: "${ARCH}"
+platform: linux
+version: "${VERSION}"
+maintainer: matinhimself
+description: mattube server — Google Drive poller and video job processor
+homepage: https://github.com/matinhimself/mattube
+
+contents:
+  - src: bin/mattube-server
+    dst: /usr/bin/mattube-server
+    file_info:
+      mode: 0755
+  - src: deploy/mattube-server.service
+    dst: /lib/systemd/system/mattube-server.service
+
+scripts:
+  postinstall: deploy/postinstall-server.sh
+  preremove: deploy/preremove.sh

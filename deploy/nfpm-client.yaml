@@ -1,0 +1,19 @@
+name: mattube-client
+arch: "${ARCH}"
+platform: linux
+version: "${VERSION}"
+maintainer: matinhimself
+description: mattube client — YouTube discovery and download manager
+homepage: https://github.com/matinhimself/mattube
+
+contents:
+  - src: bin/mattube-client
+    dst: /usr/bin/mattube-client
+    file_info:
+      mode: 0755
+  - src: deploy/mattube-client.service
+    dst: /lib/systemd/system/mattube-client.service
+
+scripts:
+  postinstall: deploy/postinstall-client.sh
+  preremove: deploy/preremove.sh
