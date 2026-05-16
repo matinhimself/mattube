@@ -120,7 +120,7 @@ func pollDrive(ctx context.Context, dc *drive.Client, mgr *jobs.Manager, cfg *co
 					log.Printf("download request file %s: %v", f.Id, err)
 					continue
 				}
-				log.Printf("drive poll: request %s url=%s quality=%s", req.JobID, req.URL, req.Quality)
+				log.Printf("drive poll: request %s url=%s quality=%s chunk_duration_s=%d", req.JobID, req.URL, req.Quality, req.ChunkDurationS)
 				if req.JobID == "" {
 					log.Printf("bad request file %s: missing job_id", f.Id)
 					dc.Delete(ctx, f.Id) //nolint:errcheck
