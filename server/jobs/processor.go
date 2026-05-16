@@ -108,7 +108,7 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 		"--newline",
 		"--concurrent-fragments", "16",
 		"--throttled-rate", "100K",
-		"--extractor-args", "youtube:player_client=tv_embedded",
+		"--extractor-args", "youtube:player_client=android,web",
 	}
 	args = append(args, req.URL)
 
@@ -286,7 +286,7 @@ func (p *Processor) resolveStreamURLs(ctx context.Context, req *Request) (videoU
 			"--format", format,
 			"--get-url",
 			"--no-playlist",
-			"--extractor-args", "youtube:player_client=tv_embedded",
+			"--extractor-args", "youtube:player_client=android,web",
 			req.URL,
 		).Output()
 		if err != nil {
