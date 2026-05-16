@@ -287,19 +287,19 @@ func (p *Processor) resolveStreamURLs(ctx context.Context, req *Request) (videoU
 		"web",
 		"tv_embedded,web",
 		"ios",
+		"", // no --extractor-args
 	}
 
 	getURL := func(formats []string) (string, error) {
 		var lastErr error
 		for _, client := range playerClients {
 			for _, format := range formats {
-				cmd := exec.CommandContext(ctx, "yt-dlp",
-					"--format", format,
-					"--get-url",
-					"--no-playlist",
-					"--extractor-args", "youtube:player_client="+client,
-					req.URL,
-				)
+					args := []string{"--format", format, "--get-url", "--no-playlist"}
+				if client != "" {
+					args = append(args, "--extractor-args", "youtube:player_client="+client)
+				}
+				args = append(args, req.URL)
+				cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 				out, cmdErr := cmd.Output()
 				if cmdErr != nil {
 					var exitErr *exec.ExitError
