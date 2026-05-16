@@ -106,8 +106,9 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 		"--no-playlist",
 		"--progress",
 		"--newline",
-		"--concurrent-fragments", "4",
+		"--concurrent-fragments", "16",
 		"--throttled-rate", "100K",
+		"--extractor-args", "youtube:player_client=tv_embedded",
 	}
 	args = append(args, req.URL)
 
@@ -160,9 +161,17 @@ func (p *Processor) download(ctx context.Context, req *Request, jobDir string, p
 	return "", fmt.Errorf("no .mp4 found in %s after download", jobDir)
 }
 
+func (p *Processor) chunkUploadFolder() string {
+	if p.outputFolder != "" {
+		return p.outputFolder
+	}
+	return p.statusFolder
+}
+
 func (p *Processor) processChunked(ctx context.Context, req *Request, inputPath, statusFileID string) error {
 	dir := filepath.Dir(inputPath)
 	pattern := filepath.Join(dir, "chunk_%03d.ts")
+	log.Printf("[%s] processChunked: outputFolder=%q statusFolder=%q", req.JobID, p.outputFolder, p.statusFolder)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", inputPath,
 		"-c", "copy", "-f", "segment",
@@ -192,7 +201,7 @@ func (p *Processor) processChunked(ctx context.Context, req *Request, inputPath,
 	var uploaded []ChunkRef
 	for i, path := range chunkPaths {
 		dur := probeChunkDuration(path)
-		driveID, err := p.driveClient.UploadFile(ctx, p.outputFolder, path, "video/mp2t")
+		driveID, err := p.driveClient.UploadFile(ctx, p.chunkUploadFolder(), path, "video/mp2t")
 		if err != nil {
 			return fmt.Errorf("upload chunk %d: %w", i, err)
 		}

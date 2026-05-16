@@ -161,10 +161,11 @@ func (c *Client) UploadFile(ctx context.Context, folderID, localPath, mimeType s
 		return "", err
 	}
 
-	log.Printf("drive: uploading %s (%.2f MB) to folder %s", stat.Name(), float64(stat.Size())/(1024*1024), folderID)
+	log.Printf("drive: uploading %s (%.2f MB) to folder %s mime=%s", stat.Name(), float64(stat.Size())/(1024*1024), folderID, mimeType)
 	meta := &drive.File{
-		Name:    stat.Name(),
-		Parents: []string{folderID},
+		Name:     stat.Name(),
+		Parents:  []string{folderID},
+		MimeType: mimeType,
 	}
 	created, err := c.svc.Files.Create(meta).
 		Context(ctx).
