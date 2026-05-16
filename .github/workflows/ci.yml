@@ -193,11 +193,11 @@ jobs:
           name: debs-${{ matrix.goarch }}
           path: dist/
 
-  # ── GitHub Release (on version tags, not RC) ──────────────────────────────────
+  # ── GitHub Release ────────────────────────────────────────────────────────────
   release:
     name: GitHub Release
-    needs: [build-release, package-deb]
-    if: ${{ !contains(github.ref_name, '-rc') }}
+    needs: [build-release, build-rc, package-deb]
+    if: ${{ always() && needs.package-deb.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
