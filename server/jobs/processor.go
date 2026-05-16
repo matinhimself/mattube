@@ -306,10 +306,10 @@ func (p *Processor) resolveStreamURLs(ctx context.Context, req *Request) (videoU
 	videoFmts, audioFmt := ytdlpStreamFormats(req.Quality)
 
 	playerClients := []string{
+		"android_vr",
 		"web",
 		"tv_embedded,web",
-		"ios",
-		"", // no --extractor-args
+		"", // yt-dlp default client selection
 	}
 
 	getURL := func(formats []string) (string, error) {
@@ -367,6 +367,7 @@ func ytdlpStreamFormats(quality string) (videoFmts []string, audioFmt string) {
 			"bestvideo[height<=2160][vcodec^=avc1]",
 			"bestvideo[height<=2160]",
 			"bestvideo",
+			"best[height<=2160][protocol^=m3u8]",
 			"best[height<=2160]",
 			"best",
 		}
@@ -375,6 +376,7 @@ func ytdlpStreamFormats(quality string) (videoFmts []string, audioFmt string) {
 			"bestvideo[height<=1440][vcodec^=avc1]",
 			"bestvideo[height<=1440]",
 			"bestvideo",
+			"best[height<=1440][protocol^=m3u8]",
 			"best[height<=1440]",
 			"best",
 		}
@@ -383,6 +385,7 @@ func ytdlpStreamFormats(quality string) (videoFmts []string, audioFmt string) {
 			"bestvideo[height<=1080][vcodec^=avc1]",
 			"bestvideo[height<=1080]",
 			"bestvideo",
+			"best[height<=1080][protocol^=m3u8]",
 			"best[height<=1080]",
 			"best",
 		}
@@ -391,15 +394,16 @@ func ytdlpStreamFormats(quality string) (videoFmts []string, audioFmt string) {
 			"bestvideo[height<=720][vcodec^=avc1]",
 			"bestvideo[height<=720]",
 			"bestvideo",
+			"best[height<=720][protocol^=m3u8]",
 			"best[height<=720]",
 			"best",
 		}
 	case "480p":
-		videoFmts = []string{"bestvideo[height<=480]", "bestvideo", "best[height<=480]", "best"}
+		videoFmts = []string{"bestvideo[height<=480]", "bestvideo", "best[height<=480][protocol^=m3u8]", "best[height<=480]", "best"}
 	case "360p":
-		videoFmts = []string{"bestvideo[height<=360]", "bestvideo", "best[height<=360]", "best"}
+		videoFmts = []string{"bestvideo[height<=360]", "bestvideo", "best[height<=360][protocol^=m3u8]", "best[height<=360]", "best"}
 	default:
-		videoFmts = []string{"bestvideo[vcodec^=avc1]", "bestvideo", "best"}
+		videoFmts = []string{"bestvideo[vcodec^=avc1]", "bestvideo", "best[protocol^=m3u8]", "best"}
 	}
 	audioFmt = "bestaudio[acodec^=mp4a]/bestaudio"
 	return
