@@ -284,9 +284,9 @@ func (p *Processor) resolveStreamURLs(ctx context.Context, req *Request) (videoU
 	videoFmts, audioFmt := ytdlpStreamFormats(req.Quality)
 
 	playerClients := []string{
-		"android,web",
 		"web",
 		"tv_embedded,web",
+		"ios",
 	}
 
 	getURL := func(formats []string) (string, error) {
