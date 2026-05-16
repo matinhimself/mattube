@@ -35,7 +35,7 @@ func NewProcessor(dc *drive.Client, outputFolder, statusFolder, downloadDir stri
 }
 
 func (p *Processor) Process(ctx context.Context, req *Request) {
-	log.Printf("[%s] starting: %s quality=%s", req.JobID, req.URL, req.Quality)
+	log.Printf("[%s] starting: %s quality=%s chunk_size_mb=%d", req.JobID, req.URL, req.Quality, req.ChunkSizeMB)
 
 	jobDir := filepath.Join(p.downloadDir, req.JobID)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
@@ -49,6 +49,15 @@ func (p *Processor) Process(ctx context.Context, req *Request) {
 		log.Printf("[%s] warn: could not create status file: %v", req.JobID, err)
 	}
 
+	// Streaming chunked mode: segment while downloading via ffmpeg direct URLs
+	if req.ChunkSizeMB > 0 {
+		log.Printf("[%s] streaming-chunk mode: %d MB segments", req.JobID, req.ChunkSizeMB)
+		if err := p.processStreamingChunked(ctx, req, jobDir, statusFileID); err != nil {
+			p.updateStatus(ctx, statusFileID, req.JobID, StatusFailed, 0, "", err.Error())
+		}
+		return
+	}
+
 	// Download
 	p.updateStatus(ctx, statusFileID, req.JobID, StatusDownloading, 0, "", "")
 	outPath, err := p.download(ctx, req, jobDir, func(pct int) {
@@ -56,15 +65,6 @@ func (p *Processor) Process(ctx context.Context, req *Request) {
 	})
 	if err != nil {
 		p.updateStatus(ctx, statusFileID, req.JobID, StatusFailed, 0, "", err.Error())
-		return
-	}
-
-	// Chunked mode: segment into TS and upload each chunk as it's ready
-	if req.ChunkDurationS > 0 {
-		log.Printf("[%s] chunking: %ds segments", req.JobID, req.ChunkDurationS)
-		if err := p.processChunked(ctx, req, outPath, statusFileID); err != nil {
-			p.updateStatus(ctx, statusFileID, req.JobID, StatusFailed, 0, "", err.Error())
-		}
 		return
 	}
 
@@ -168,64 +168,183 @@ func (p *Processor) chunkUploadFolder() string {
 	return p.statusFolder
 }
 
-func (p *Processor) processChunked(ctx context.Context, req *Request, inputPath, statusFileID string) error {
-	dir := filepath.Dir(inputPath)
-	pattern := filepath.Join(dir, "chunk_%03d.ts")
-	log.Printf("[%s] processChunked: outputFolder=%q statusFolder=%q", req.JobID, p.outputFolder, p.statusFolder)
+// processStreamingChunked gets direct stream URLs from yt-dlp, then pipes them
+// through ffmpeg to produce TS segments in real-time, uploading each chunk as
+// ffmpeg finishes writing it — so playback can start before the download ends.
+func (p *Processor) processStreamingChunked(ctx context.Context, req *Request, jobDir, statusFileID string) error {
+	p.updateStatus(ctx, statusFileID, req.JobID, StatusDownloading, 0, "", "")
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", inputPath,
-		"-c", "copy", "-f", "segment",
-		"-segment_time", strconv.Itoa(req.ChunkDurationS),
-		"-reset_timestamps", "0",
-		pattern)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg segment: %w\n%s", err, out)
-	}
-
-	entries, err := os.ReadDir(dir)
+	// Resolve direct media URLs for video+audio streams.
+	videoURL, audioURL, err := p.resolveStreamURLs(ctx, req)
 	if err != nil {
-		return fmt.Errorf("readdir: %w", err)
+		return fmt.Errorf("resolve stream urls: %w", err)
 	}
-	var chunkPaths []string
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "chunk_") && strings.HasSuffix(e.Name(), ".ts") {
-			chunkPaths = append(chunkPaths, filepath.Join(dir, e.Name()))
-		}
+	log.Printf("[%s] resolved streams: video=%s audio=%s", req.JobID, videoURL[:min(60, len(videoURL))], audioURL[:min(60, len(audioURL))])
+
+	chunkSizeBytes := int64(req.ChunkSizeMB) * 1024 * 1024
+	pattern := filepath.Join(jobDir, "chunk_%05d.ts")
+
+	// ffmpeg downloads both streams, muxes them, and segments by byte size.
+	args := []string{
+		"-y",
+		"-i", videoURL,
+		"-i", audioURL,
+		"-map", "0:v:0",
+		"-map", "1:a:0",
+		"-c", "copy",
+		"-f", "segment",
+		"-segment_format", "mpegts",
+		"-segment_size", strconv.FormatInt(chunkSizeBytes, 10),
+		"-reset_timestamps", "1",
+		pattern,
 	}
-	sort.Strings(chunkPaths)
+	log.Printf("[%s] ffmpeg segmenting start: segment_size=%dMB", req.JobID, req.ChunkSizeMB)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 
-	total := len(chunkPaths)
-	log.Printf("[%s] segmented into %d chunks", req.JobID, total)
-	p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkDurationS, total, nil, false)
+	var ffmpegErrBuf strings.Builder
+	cmd.Stderr = &ffmpegErrBuf
 
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("ffmpeg start: %w", err)
+	}
+
+	// Poll the job directory and upload completed chunks while ffmpeg runs.
 	var uploaded []ChunkRef
-	for i, path := range chunkPaths {
-		dur := probeChunkDuration(path)
-		driveID, err := p.driveClient.UploadFile(ctx, p.chunkUploadFolder(), path, "video/mp2t")
-		if err != nil {
-			return fmt.Errorf("upload chunk %d: %w", i, err)
+	uploadedSet := map[int]bool{}
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	uploadChunks := func(done bool) {
+		entries, _ := os.ReadDir(jobDir)
+		var chunkPaths []string
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "chunk_") && strings.HasSuffix(e.Name(), ".ts") {
+				chunkPaths = append(chunkPaths, filepath.Join(jobDir, e.Name()))
+			}
 		}
-		uploaded = append(uploaded, ChunkRef{Index: i, DriveFileID: driveID, DurationS: dur})
-		p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkDurationS, total, uploaded, false)
-		log.Printf("[%s] uploaded chunk %d/%d (%.1fs)", req.JobID, i+1, total, dur)
+		sort.Strings(chunkPaths)
+
+		// When still running: upload all-but-last (last may still be written).
+		limit := len(chunkPaths)
+		if !done && limit > 0 {
+			limit--
+		}
+		for i, path := range chunkPaths[:limit] {
+			if uploadedSet[i] {
+				continue
+			}
+			dur := probeChunkDuration(path)
+			driveID, err := p.driveClient.UploadFile(ctx, p.chunkUploadFolder(), path, "video/mp2t")
+			if err != nil {
+				log.Printf("[%s] warn: upload chunk %d: %v", req.JobID, i, err)
+				continue
+			}
+			uploadedSet[i] = true
+			uploaded = append(uploaded, ChunkRef{Index: i, DriveFileID: driveID, DurationS: dur})
+			log.Printf("[%s] uploaded chunk %d (%.1fs)", req.JobID, i, dur)
+			p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkSizeMB, -1, uploaded, false)
+		}
 	}
 
-	p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkDurationS, total, uploaded, true)
+	doneCh := make(chan error, 1)
+	go func() { doneCh <- cmd.Wait() }()
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			cmd.Process.Kill() //nolint:errcheck
+			return ctx.Err()
+		case ffErr := <-doneCh:
+			if ffErr != nil {
+				tail := ffmpegErrBuf.String()
+				if len(tail) > 500 {
+					tail = tail[len(tail)-500:]
+				}
+				return fmt.Errorf("ffmpeg: %w\n%s", ffErr, tail)
+			}
+			break loop
+		case <-ticker.C:
+			uploadChunks(false)
+		}
+	}
+
+	// Upload any remaining chunks.
+	uploadChunks(true)
+
+	p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkSizeMB, len(uploaded), uploaded, true)
+	log.Printf("[%s] streaming-chunk done: %d chunks", req.JobID, len(uploaded))
 	return nil
 }
 
-func (p *Processor) updateChunkStatus(ctx context.Context, fileID, jobID string, chunkTargetS, totalChunks int, chunks []ChunkRef, done bool) {
+// resolveStreamURLs calls yt-dlp --get-url for video and audio format strings.
+func (p *Processor) resolveStreamURLs(ctx context.Context, req *Request) (videoURL, audioURL string, err error) {
+	videoFmt, audioFmt := ytdlpStreamFormats(req.Quality)
+
+	getURL := func(format string) (string, error) {
+		out, err := exec.CommandContext(ctx, "yt-dlp",
+			"--format", format,
+			"--get-url",
+			"--no-playlist",
+			"--extractor-args", "youtube:player_client=tv_embedded",
+			req.URL,
+		).Output()
+		if err != nil {
+			return "", fmt.Errorf("yt-dlp --get-url %s: %w", format, err)
+		}
+		u := strings.TrimSpace(string(out))
+		if u == "" {
+			return "", fmt.Errorf("yt-dlp --get-url %s: empty output", format)
+		}
+		return u, nil
+	}
+
+	videoURL, err = getURL(videoFmt)
+	if err != nil {
+		return "", "", err
+	}
+	audioURL, err = getURL(audioFmt)
+	return videoURL, audioURL, err
+}
+
+// ytdlpStreamFormats returns separate video-only and audio-only format selectors.
+func ytdlpStreamFormats(quality string) (videoFmt, audioFmt string) {
+	switch quality {
+	case "2160p":
+		videoFmt = "bestvideo[height<=2160][vcodec^=avc1]/bestvideo[height<=2160]"
+	case "1440p":
+		videoFmt = "bestvideo[height<=1440][vcodec^=avc1]/bestvideo[height<=1440]"
+	case "1080p":
+		videoFmt = "bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]"
+	case "720p":
+		videoFmt = "bestvideo[height<=720][vcodec^=avc1]/bestvideo[height<=720]"
+	case "480p":
+		videoFmt = "bestvideo[height<=480]/bestvideo"
+	case "360p":
+		videoFmt = "bestvideo[height<=360]/bestvideo"
+	default:
+		videoFmt = "bestvideo[vcodec^=avc1]/bestvideo"
+	}
+	audioFmt = "bestaudio[acodec^=mp4a]/bestaudio"
+	return
+}
+
+func (p *Processor) updateChunkStatus(ctx context.Context, fileID, jobID string, chunkSizeMB, totalChunks int, chunks []ChunkRef, done bool) {
 	st := StatusChunking
 	if done {
 		st = StatusDone
 	}
+	total := totalChunks
+	if total < 0 {
+		total = 0 // unknown while streaming
+	}
 	s := &Status{
-		JobID:        jobID,
-		Status:       st,
-		TotalChunks:  totalChunks,
-		ChunkTargetS: chunkTargetS,
-		Chunks:       chunks,
-		UpdatedAt:    now(),
+		JobID:       jobID,
+		Status:      st,
+		TotalChunks: total,
+		ChunkSizeMB: chunkSizeMB,
+		Chunks:      chunks,
+		UpdatedAt:   now(),
 	}
 	if fileID == "" {
 		p.driveClient.UploadJSON(ctx, p.statusFolder, "status-"+jobID+".json", s) //nolint:errcheck

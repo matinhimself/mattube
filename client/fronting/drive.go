@@ -3,6 +3,7 @@ package fronting
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,6 +63,38 @@ func (p *PersistingTokenSource) Token() (*oauth2.Token, error) {
 	if tok.AccessToken != p.last {
 		if b, err := json.MarshalIndent(tok, "", "  "); err == nil {
 			os.WriteFile(p.File, b, 0600) //nolint:errcheck
+		}
+		p.last = tok.AccessToken
+	}
+	return tok, nil
+}
+
+// PersistingDBTokenSource wraps a base TokenSource and writes refreshed tokens to the database.
+type PersistingDBTokenSource struct {
+	mu   sync.Mutex
+	Base oauth2.TokenSource
+	db   *sql.DB
+	last string
+}
+
+func NewPersistingDBTokenSource(base oauth2.TokenSource, database *sql.DB, lastToken string) *PersistingDBTokenSource {
+	return &PersistingDBTokenSource{Base: base, db: database, last: lastToken}
+}
+
+func (p *PersistingDBTokenSource) Token() (*oauth2.Token, error) {
+	tok, err := p.Base.Token()
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if tok.AccessToken != p.last {
+		if b, err := json.MarshalIndent(tok, "", "  "); err == nil {
+			p.db.Exec( //nolint:errcheck
+				`INSERT INTO settings(key,value,updated_at) VALUES('drive_token',?,datetime('now'))
+				 ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`,
+				string(b),
+			)
 		}
 		p.last = tok.AccessToken
 	}

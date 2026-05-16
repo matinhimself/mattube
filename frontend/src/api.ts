@@ -48,7 +48,7 @@ export interface JobStatus {
   error?: string
   updated_at: string
   total_chunks?: number
-  chunk_target_s?: number
+  chunk_size_mb?: number
   chunks?: ChunkRef[]
 }
 
@@ -88,11 +88,11 @@ export const api = {
   getChannelVideos: (channelId: string): Promise<SearchResult[]> =>
     request(`/api/channel/${channelId}/videos`),
 
-  submitJob: (url: string, quality = '1080p', chunkDurationS = 0): Promise<{ job_id: string }> =>
+  submitJob: (url: string, quality = '1080p', chunkSizeMB = 0): Promise<{ job_id: string }> =>
     request('/api/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, quality, chunk_duration_s: chunkDurationS }),
+      body: JSON.stringify({ url, quality, chunk_size_mb: chunkSizeMB }),
     }),
 
   getJobStatus: (jobId: string): Promise<JobStatus> =>

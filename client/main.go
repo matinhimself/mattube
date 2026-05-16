@@ -134,6 +134,9 @@ func serve(configPath string) {
 	} else if ts, err := cli.LoadTokenSource(cfg.DriveCredsFile, cfg.DriveTokenFile, frontClient); err == nil {
 		log.Printf("Drive: token loaded from %s (creds: %s)", cfg.DriveTokenFile, cfg.DriveCredsFile)
 		driveClient = fronting.NewDriveClientWithSource(cfg.FrontingIP, cfg.AllowedSNI, ts)
+	} else if ts, err := cli.LoadTokenSourceFromDB(cfg.DriveCredsFile, database, frontClient); err == nil {
+		log.Println("Drive: token loaded from database")
+		driveClient = fronting.NewDriveClientWithSource(cfg.FrontingIP, cfg.AllowedSNI, ts)
 	} else {
 		log.Printf("Drive: no token found (%v) — connect via admin UI", err)
 		driveClient = fronting.NewDriveClient(cfg.FrontingIP, cfg.AllowedSNI, "")

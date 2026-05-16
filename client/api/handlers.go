@@ -23,6 +23,7 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"github.com/matinhimself/mattube/client/auth"
+	"github.com/matinhimself/mattube/client/db"
 	"github.com/matinhimself/mattube/client/fronting"
 )
 
@@ -43,7 +44,7 @@ type JobStatus struct {
 	Error         string     `json:"error,omitempty"`
 	UpdatedAt     string     `json:"updated_at"`
 	TotalChunks   int        `json:"total_chunks,omitempty"`
-	ChunkTargetS  int        `json:"chunk_target_s,omitempty"`
+	ChunkSizeMB   int        `json:"chunk_size_mb,omitempty"`
 	Chunks        []ChunkRef `json:"chunks,omitempty"`
 }
 
@@ -293,9 +294,9 @@ func (s *Server) channelVideos(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		URL            string `json:"url"`
-		Quality        string `json:"quality"`
-		ChunkDurationS int    `json:"chunk_duration_s"`
+		URL         string `json:"url"`
+		Quality     string `json:"quality"`
+		ChunkSizeMB int    `json:"chunk_size_mb"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
 		jsonError(w, "url required", http.StatusBadRequest)
@@ -307,11 +308,11 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 
 	jobID := newJobID()
 	req := map[string]any{
-		"job_id":           jobID,
-		"url":              body.URL,
-		"quality":          body.Quality,
-		"requested_at":     time.Now().UTC().Format(time.RFC3339),
-		"chunk_duration_s": body.ChunkDurationS,
+		"job_id":        jobID,
+		"url":           body.URL,
+		"quality":       body.Quality,
+		"requested_at":  time.Now().UTC().Format(time.RFC3339),
+		"chunk_size_mb": body.ChunkSizeMB,
 	}
 
 	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -412,9 +413,15 @@ func (s *Server) streamJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) servePlaylist(w http.ResponseWriter, jobID string, status *JobStatus) {
-	targetDuration := status.ChunkTargetS
-	if targetDuration <= 0 {
-		targetDuration = 60
+	// Compute TARGETDURATION from actual chunk durations (HLS spec: max segment duration, rounded up).
+	maxDur := 0
+	for _, c := range status.Chunks {
+		if d := int(c.DurationS) + 1; d > maxDur {
+			maxDur = d
+		}
+	}
+	if maxDur <= 0 {
+		maxDur = 120 // conservative default while no chunks uploaded yet
 	}
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
@@ -422,7 +429,7 @@ func (s *Server) servePlaylist(w http.ResponseWriter, jobID string, status *JobS
 
 	fmt.Fprintln(w, "#EXTM3U")
 	fmt.Fprintln(w, "#EXT-X-VERSION:3")
-	fmt.Fprintf(w, "#EXT-X-TARGETDURATION:%d\n", targetDuration+1)
+	fmt.Fprintf(w, "#EXT-X-TARGETDURATION:%d\n", maxDur)
 	if status.Status == "done" {
 		fmt.Fprintln(w, "#EXT-X-PLAYLIST-TYPE:VOD")
 	} else {
@@ -712,15 +719,18 @@ func (s *Server) driveCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if b, err := json.MarshalIndent(token, "", "  "); err == nil {
+		db.SetSetting(s.db, "drive_token", string(b)) //nolint:errcheck
+	}
 	if s.driveTokenFile != "" {
 		if b, err := json.MarshalIndent(token, "", "  "); err == nil {
 			os.WriteFile(s.driveTokenFile, b, 0600) //nolint:errcheck
 		}
 	}
 
-	ts := fronting.NewPersistingTokenSource(
+	ts := fronting.NewPersistingDBTokenSource(
 		cfg.TokenSource(frontCtx, token),
-		s.driveTokenFile,
+		s.db,
 		token.AccessToken,
 	)
 	s.drive.SetTokenSource(ts)

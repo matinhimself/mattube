@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type JobStatus } from '../api'
+  import { player } from '../lib/player.svelte'
 
   let jobs = $state<JobStatus[]>([])
   let loading = $state(true)
@@ -7,7 +8,7 @@
 
   $effect(() => {
     refresh()
-    const timer = setInterval(refresh, 5000)
+    const timer = setInterval(refresh, 3000)
     return () => clearInterval(timer)
   })
 
@@ -25,6 +26,25 @@
     if (s === 'done') return 'chip-done'
     if (s === 'failed') return 'chip-failed'
     return 'chip-active'
+  }
+
+  function isPlayable(job: JobStatus): boolean {
+    if (job.status === 'done') return true
+    return job.status === 'chunking' && (job.chunks?.length ?? 0) > 0
+  }
+
+  function playJob(job: JobStatus) {
+    const isChunked = (job.chunks?.length ?? 0) > 0
+    if (!isChunked && !job.drive_file_id) return
+    player.loadTrack({
+      jobId: job.job_id,
+      videoId: '',
+      title: `Job ${job.job_id}`,
+      channelName: '',
+      thumbnailUrl: '',
+      duration: 0,
+      chunked: isChunked,
+    })
   }
 </script>
 
@@ -55,8 +75,15 @@
             {/if}
           </div>
           <span class="chip {statusChip(job.status)}">
-            {job.status}{job.progress && job.status !== 'done' ? ` ${job.progress}%` : ''}
+            {#if job.status === 'chunking'}
+              chunking ({job.chunks?.length ?? 0}{job.total_chunks ? `/${job.total_chunks}` : ''})
+            {:else}
+              {job.status}{job.progress && job.status !== 'done' ? ` ${job.progress}%` : ''}
+            {/if}
           </span>
+          {#if isPlayable(job)}
+            <button onclick={() => playJob(job)} class="btn-accent dl-btn">▶ Play</button>
+          {/if}
           {#if job.status === 'done' && job.drive_file_id}
             <a href={`/api/jobs/${job.job_id}/stream`} class="btn-ghost dl-btn" download>↓ Save</a>
           {/if}

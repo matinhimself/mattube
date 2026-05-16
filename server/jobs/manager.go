@@ -19,11 +19,11 @@ const (
 
 // Request is read from request-<id>.json on Drive.
 type Request struct {
-	JobID          string `json:"job_id"`
-	URL            string `json:"url"`
-	Quality        string `json:"quality"`
-	RequestedAt    string `json:"requested_at"`
-	ChunkDurationS int    `json:"chunk_duration_s,omitempty"`
+	JobID       string `json:"job_id"`
+	URL         string `json:"url"`
+	Quality     string `json:"quality"`
+	RequestedAt string `json:"requested_at"`
+	ChunkSizeMB int    `json:"chunk_size_mb,omitempty"`
 }
 
 // ChunkRef identifies a single uploaded segment.
@@ -43,7 +43,7 @@ type Status struct {
 	Error         string     `json:"error,omitempty"`
 	UpdatedAt     string     `json:"updated_at"`
 	TotalChunks   int        `json:"total_chunks,omitempty"`
-	ChunkTargetS  int        `json:"chunk_target_s,omitempty"`
+	ChunkSizeMB   int        `json:"chunk_size_mb,omitempty"`
 	Chunks        []ChunkRef `json:"chunks,omitempty"`
 }
 

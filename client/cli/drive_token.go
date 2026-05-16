@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
+	"github.com/matinhimself/mattube/client/db"
 	"github.com/matinhimself/mattube/client/fronting"
 )
 
@@ -209,6 +211,37 @@ func LoadTokenSource(credentialsFile, tokenFile string, httpClient *http.Client)
 	}
 	base := cfg.TokenSource(ctx, &token)
 	return fronting.NewPersistingTokenSource(base, tokenFile, token.AccessToken), nil
+}
+
+const DriveTokenDBKey = "drive_token"
+
+// LoadTokenSourceFromDB loads the Drive OAuth token stored in the database.
+func LoadTokenSourceFromDB(credentialsFile string, database *sql.DB, httpClient *http.Client) (oauth2.TokenSource, error) {
+	if credentialsFile == "" {
+		credentialsFile = "credentials.json"
+	}
+	creds, err := os.ReadFile(credentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("read credentials: %w", err)
+	}
+	cfg, err := google.ConfigFromJSON(creds, driveScope)
+	if err != nil {
+		return nil, fmt.Errorf("parse credentials: %w", err)
+	}
+	tokenJSON, err := db.GetSetting(database, DriveTokenDBKey)
+	if err != nil {
+		return nil, fmt.Errorf("no token in db: %w", err)
+	}
+	var token oauth2.Token
+	if err := json.Unmarshal([]byte(tokenJSON), &token); err != nil {
+		return nil, fmt.Errorf("parse token: %w", err)
+	}
+	ctx := context.Background()
+	if httpClient != nil {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
+	}
+	base := cfg.TokenSource(ctx, &token)
+	return fronting.NewPersistingDBTokenSource(base, database, token.AccessToken), nil
 }
 
 // PrintTokenFromFile prints a fresh access token to stdout.

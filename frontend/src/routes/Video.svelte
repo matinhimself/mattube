@@ -12,7 +12,7 @@
   let descExpanded = $state(false)
 
   let selectedQuality = $state('1080p')
-  let chunkDuration = $state(0)
+  let chunkSizeMB = $state(0)
   let submitting = $state(false)
   let jobStatus = $state<JobStatus | null>(null)
   let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -40,9 +40,9 @@
     if (!info) return
     submitting = true
     try {
-      const { job_id } = await api.submitJob(`https://www.youtube.com/watch?v=${videoId}`, selectedQuality, chunkDuration)
+      const { job_id } = await api.submitJob(`https://www.youtube.com/watch?v=${videoId}`, selectedQuality, chunkSizeMB)
       jobStatus = { job_id, status: 'pending', progress: 0, updated_at: '' }
-      pollTimer = setInterval(() => pollStatus(job_id), 3000)
+      pollTimer = setInterval(() => pollStatus(job_id), 2000)
     } catch (e: any) {
       error = e.message
     } finally {
@@ -66,15 +66,18 @@
   }
 
   function chunkProgress(s: JobStatus): number {
-    if (s.status === 'chunking' && s.total_chunks) {
-      return Math.round((s.chunks?.length ?? 0) / s.total_chunks * 100)
+    if (s.status === 'chunking') {
+      const n = s.chunks?.length ?? 0
+      if (s.total_chunks) return Math.round(n / s.total_chunks * 100)
+      return n > 0 ? 50 : 0 // unknown total: show indeterminate
     }
     return s.progress
   }
 
   function chunkLabel(s: JobStatus): string {
-    if (s.status === 'chunking' && s.total_chunks) {
-      return `chunking ${s.chunks?.length ?? 0}/${s.total_chunks}`
+    if (s.status === 'chunking') {
+      const n = s.chunks?.length ?? 0
+      return s.total_chunks ? `chunking ${n}/${s.total_chunks}` : `chunking (${n} ready)`
     }
     return `${s.status} ${s.progress}%`
   }
@@ -97,9 +100,10 @@
   const QUALITIES = ['best', '2160p', '1440p', '1080p', '720p', '480p', '360p', 'audio']
   const CHUNK_OPTS = [
     { label: 'No chunks', value: 0 },
-    { label: '30s chunks', value: 30 },
-    { label: '1 min chunks', value: 60 },
-    { label: '2 min chunks', value: 120 },
+    { label: '5 MB chunks', value: 5 },
+    { label: '10 MB chunks', value: 10 },
+    { label: '20 MB chunks', value: 20 },
+    { label: '50 MB chunks', value: 50 },
   ]
 
   function fmtDuration(s: number) {
@@ -152,7 +156,7 @@
           {/each}
         </select>
 
-        <select bind:value={chunkDuration} class="select-base">
+        <select bind:value={chunkSizeMB} class="select-base">
           {#each CHUNK_OPTS as o}
             <option value={o.value}>{o.label}</option>
           {/each}

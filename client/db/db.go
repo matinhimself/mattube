@@ -39,6 +39,30 @@ func migrate(db *sql.DB) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+	CREATE TABLE IF NOT EXISTS settings (
+		key         TEXT PRIMARY KEY,
+		value       TEXT NOT NULL,
+		updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+	);
 	`)
+	return err
+}
+
+func GetSetting(db *sql.DB, key string) (string, error) {
+	var value string
+	err := db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func SetSetting(db *sql.DB, key, value string) error {
+	_, err := db.Exec(
+		`INSERT INTO settings(key, value, updated_at) VALUES(?, ?, datetime('now'))
+		 ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+		key, value,
+	)
 	return err
 }
