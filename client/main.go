@@ -147,7 +147,10 @@ func serve(configPath string) {
 	ytClient := fronting.NewYouTubeClient(cfg.FrontingIP, cfg.AllowedSNI, cfg.YouTubeAPIKey)
 	thumbCache := api.NewThumbCache(64<<20, 6*time.Hour)
 
-	apiServer := api.NewServer(database, driveClient, ytClient, frontClient, thumbCache, cfg.DriveFolderID, cfg.LocalMode, cfg.DriveCredsFile, cfg.DriveTokenFile)
+	jobPollInterval := parseDurationDefault(cfg.JobPollInterval, 2*time.Minute)
+	jobTimeout := parseDurationDefault(cfg.JobTimeout, 2*time.Hour)
+
+	apiServer := api.NewServer(database, driveClient, ytClient, frontClient, thumbCache, cfg.DriveFolderID, cfg.LocalMode, cfg.DriveCredsFile, cfg.DriveTokenFile, jobPollInterval, jobTimeout)
 
 	r := apiServer.Router()
 
@@ -177,6 +180,8 @@ func serve(configPath string) {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	apiServer.StartBackgroundTicker(ctx)
 
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: r}
 	go func() {
@@ -216,6 +221,18 @@ func argOr(args []string, i int, fallback string) string {
 		return args[i]
 	}
 	return fallback
+}
+
+func parseDurationDefault(s string, fallback time.Duration) time.Duration {
+	if s == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		log.Printf("invalid duration %q, using default %s: %v", s, fallback, err)
+		return fallback
+	}
+	return d
 }
 
 func parseGlobalFlags(args []string) (string, bool, []string, error) {

@@ -211,6 +211,51 @@ func (d *DriveClient) DownloadJSON(ctx context.Context, fileID string, dst any) 
 	return json.NewDecoder(r).Decode(dst)
 }
 
+// UpdateJSON replaces the content of an existing Drive file with src serialised as JSON.
+func (d *DriveClient) UpdateJSON(ctx context.Context, fileID string, src any) error {
+	b, err := json.Marshal(src)
+	if err != nil {
+		return err
+	}
+	u := driveUploadBase + "/files/" + fileID + "?uploadType=media"
+	req, err := http.NewRequestWithContext(ctx, "PATCH", u, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	SetBearer(req, d.bearer())
+	resp, err := d.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("drive update %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+// Delete permanently deletes a Drive file.
+func (d *DriveClient) Delete(ctx context.Context, fileID string) error {
+	u := driveAPIBase + "/files/" + fileID
+	req, err := http.NewRequestWithContext(ctx, "DELETE", u, nil)
+	if err != nil {
+		return err
+	}
+	SetBearer(req, d.bearer())
+	resp, err := d.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 204 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("drive delete %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
 // ListByPrefix lists files in folderID whose names start with prefix.
 func (d *DriveClient) ListByPrefix(ctx context.Context, folderID, prefix string) ([]struct {
 	ID   string `json:"id"`

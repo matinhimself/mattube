@@ -34,6 +34,14 @@ type Config struct {
 
 	// LocalMode disables authentication entirely — useful for single-user local installs.
 	LocalMode bool `json:"local_mode"`
+
+	// JobPollInterval is how often the background ticker refreshes job statuses from Drive.
+	// Format: Go duration string, e.g. "2m", "90s". Default: "2m".
+	JobPollInterval string `json:"job_poll_interval"`
+
+	// JobTimeout is how long a job can stay in pending/processing before being marked failed
+	// and its Drive files deleted. Format: Go duration string, e.g. "2h". Default: "2h".
+	JobTimeout string `json:"job_timeout"`
 }
 
 func Load(path string) (*Config, error) {

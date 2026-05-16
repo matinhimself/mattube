@@ -80,11 +80,15 @@ type Server struct {
 	cache     *jobCache
 	localMode bool
 
-	driveCredsFile string
-	driveTokenFile string
-	driveStateMu   sync.Mutex
-	drivePendState map[string]time.Time // OAuth state -> expiry (redirect URL embedded in state)
-	drivePendRedir map[string]string    // OAuth state -> redirect URL
+	driveCredsFile  string
+	driveTokenFile  string
+	driveStateMu    sync.Mutex
+	drivePendState  map[string]time.Time // OAuth state -> expiry
+	drivePendRedir  map[string]string    // OAuth state -> redirect URL
+	jobPollInterval time.Duration
+	jobTimeout      time.Duration
+	jobsListMu      sync.RWMutex
+	jobsList        []JobStatus
 }
 
 func NewServer(
@@ -97,20 +101,24 @@ func NewServer(
 	localMode bool,
 	driveCredsFile string,
 	driveTokenFile string,
+	jobPollInterval time.Duration,
+	jobTimeout time.Duration,
 ) *Server {
 	return &Server{
-		db:             db,
-		drive:          dc,
-		yt:             yt,
-		front:          front,
-		thumbs:         thumbs,
-		folderID:       folderID,
-		cache:          newJobCache(),
-		localMode:      localMode,
-		driveCredsFile: driveCredsFile,
-		driveTokenFile: driveTokenFile,
-		drivePendState: make(map[string]time.Time),
-		drivePendRedir: make(map[string]string),
+		db:              db,
+		drive:           dc,
+		yt:              yt,
+		front:           front,
+		thumbs:          thumbs,
+		folderID:        folderID,
+		cache:           newJobCache(),
+		localMode:       localMode,
+		driveCredsFile:  driveCredsFile,
+		driveTokenFile:  driveTokenFile,
+		drivePendState:  make(map[string]time.Time),
+		drivePendRedir:  make(map[string]string),
+		jobPollInterval: jobPollInterval,
+		jobTimeout:      jobTimeout,
 	}
 }
 
@@ -337,21 +345,13 @@ func (s *Server) jobStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
-	// List all status-*.json files from the Drive folder
-	files, err := s.drive.ListByPrefix(r.Context(), s.folderID, "status-")
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
-		return
+	s.jobsListMu.RLock()
+	list := s.jobsList
+	s.jobsListMu.RUnlock()
+	if list == nil {
+		list = []JobStatus{}
 	}
-
-	var statuses []JobStatus
-	for _, f := range files {
-		var st JobStatus
-		if err := s.drive.DownloadJSON(r.Context(), f.ID, &st); err == nil {
-			statuses = append(statuses, st)
-		}
-	}
-	jsonOK(w, statuses)
+	jsonOK(w, list)
 }
 
 func (s *Server) fetchStatus(ctx context.Context, jobID string) (JobStatus, error) {
@@ -370,6 +370,75 @@ func (s *Server) fetchStatus(ctx context.Context, jobID string) (JobStatus, erro
 		s.cache.set(jobID, &status)
 	}
 	return status, nil
+}
+
+// StartBackgroundTicker starts the periodic Drive job-status refresh and expiry loop.
+func (s *Server) StartBackgroundTicker(ctx context.Context) {
+	go func() {
+		s.tickJobs(ctx)
+		ticker := time.NewTicker(s.jobPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.tickJobs(ctx)
+			}
+		}
+	}()
+}
+
+func (s *Server) tickJobs(ctx context.Context) {
+	files, err := s.drive.ListByPrefix(ctx, s.folderID, "status-")
+	if err != nil {
+		log.Printf("tickJobs: list status files: %v", err)
+		return
+	}
+
+	var list []JobStatus
+	for _, f := range files {
+		var st JobStatus
+		if err := s.drive.DownloadJSON(ctx, f.ID, &st); err != nil {
+			log.Printf("tickJobs: download %s: %v", f.Name, err)
+			continue
+		}
+
+		if st.Status != "done" && st.Status != "failed" {
+			updated, parseErr := time.Parse(time.RFC3339, st.UpdatedAt)
+			if parseErr == nil && time.Since(updated) > s.jobTimeout {
+				log.Printf("[%s] job timed out after %s — marking failed and deleting files", st.JobID, s.jobTimeout)
+				st.Status = "failed"
+				st.Error = "timed out"
+				st.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+				if updateErr := s.drive.UpdateJSON(ctx, f.ID, st); updateErr != nil {
+					log.Printf("[%s] update status failed: %v", st.JobID, updateErr)
+				}
+				// Delete the status file
+				if deleteErr := s.drive.Delete(ctx, f.ID); deleteErr != nil {
+					log.Printf("[%s] delete status file: %v", st.JobID, deleteErr)
+				}
+				// Delete the request file if it exists
+				reqs, _ := s.drive.ListByPrefix(ctx, s.folderID, "request-"+st.JobID)
+				for _, req := range reqs {
+					if err := s.drive.Delete(ctx, req.ID); err != nil {
+						log.Printf("[%s] delete request file: %v", st.JobID, err)
+					}
+				}
+				s.cache.set(st.JobID, &st)
+				continue
+			}
+		}
+
+		if st.Status == "done" || st.Status == "failed" {
+			s.cache.set(st.JobID, &st)
+		}
+		list = append(list, st)
+	}
+
+	s.jobsListMu.Lock()
+	s.jobsList = list
+	s.jobsListMu.Unlock()
 }
 
 func (s *Server) streamJob(w http.ResponseWriter, r *http.Request) {
