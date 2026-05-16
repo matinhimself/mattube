@@ -3,6 +3,7 @@ package jobs
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -278,52 +279,91 @@ loop:
 }
 
 // resolveStreamURLs calls yt-dlp --get-url for video and audio format strings.
+// It tries each player client in order and falls back to looser format selectors on failure.
 func (p *Processor) resolveStreamURLs(ctx context.Context, req *Request) (videoURL, audioURL string, err error) {
-	videoFmt, audioFmt := ytdlpStreamFormats(req.Quality)
+	videoFmts, audioFmt := ytdlpStreamFormats(req.Quality)
 
-	getURL := func(format string) (string, error) {
-		out, err := exec.CommandContext(ctx, "yt-dlp",
-			"--format", format,
-			"--get-url",
-			"--no-playlist",
-			"--extractor-args", "youtube:player_client=android,web",
-			req.URL,
-		).Output()
-		if err != nil {
-			return "", fmt.Errorf("yt-dlp --get-url %s: %w", format, err)
-		}
-		u := strings.TrimSpace(string(out))
-		if u == "" {
-			return "", fmt.Errorf("yt-dlp --get-url %s: empty output", format)
-		}
-		return u, nil
+	playerClients := []string{
+		"android,web",
+		"web",
+		"tv_embedded,web",
 	}
 
-	videoURL, err = getURL(videoFmt)
+	getURL := func(formats []string) (string, error) {
+		var lastErr error
+		for _, client := range playerClients {
+			for _, format := range formats {
+				cmd := exec.CommandContext(ctx, "yt-dlp",
+					"--format", format,
+					"--get-url",
+					"--no-playlist",
+					"--extractor-args", "youtube:player_client="+client,
+					req.URL,
+				)
+				out, cmdErr := cmd.Output()
+				if cmdErr != nil {
+					var exitErr *exec.ExitError
+					if errors.As(cmdErr, &exitErr) {
+						lastErr = fmt.Errorf("client=%s format=%s: %w\n%s", client, format, cmdErr, exitErr.Stderr)
+					} else {
+						lastErr = fmt.Errorf("client=%s format=%s: %w", client, format, cmdErr)
+					}
+					log.Printf("[%s] yt-dlp --get-url: %v", req.JobID, lastErr)
+					continue
+				}
+				u := strings.TrimSpace(string(out))
+				if u == "" {
+					lastErr = fmt.Errorf("client=%s format=%s: empty output", client, format)
+					continue
+				}
+				log.Printf("[%s] yt-dlp --get-url resolved (client=%s format=%s)", req.JobID, client, format)
+				return u, nil
+			}
+		}
+		return "", fmt.Errorf("yt-dlp --get-url: all attempts failed: %w", lastErr)
+	}
+
+	videoURL, err = getURL(videoFmts)
 	if err != nil {
 		return "", "", err
 	}
-	audioURL, err = getURL(audioFmt)
+	audioURL, err = getURL([]string{audioFmt})
 	return videoURL, audioURL, err
 }
 
-// ytdlpStreamFormats returns separate video-only and audio-only format selectors.
-func ytdlpStreamFormats(quality string) (videoFmt, audioFmt string) {
+// ytdlpStreamFormats returns video format selectors (preferred first) and the audio selector.
+func ytdlpStreamFormats(quality string) (videoFmts []string, audioFmt string) {
 	switch quality {
 	case "2160p":
-		videoFmt = "bestvideo[height<=2160][vcodec^=avc1]/bestvideo[height<=2160]"
+		videoFmts = []string{
+			"bestvideo[height<=2160][vcodec^=avc1]",
+			"bestvideo[height<=2160]",
+			"bestvideo",
+		}
 	case "1440p":
-		videoFmt = "bestvideo[height<=1440][vcodec^=avc1]/bestvideo[height<=1440]"
+		videoFmts = []string{
+			"bestvideo[height<=1440][vcodec^=avc1]",
+			"bestvideo[height<=1440]",
+			"bestvideo",
+		}
 	case "1080p":
-		videoFmt = "bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]"
+		videoFmts = []string{
+			"bestvideo[height<=1080][vcodec^=avc1]",
+			"bestvideo[height<=1080]",
+			"bestvideo",
+		}
 	case "720p":
-		videoFmt = "bestvideo[height<=720][vcodec^=avc1]/bestvideo[height<=720]"
+		videoFmts = []string{
+			"bestvideo[height<=720][vcodec^=avc1]",
+			"bestvideo[height<=720]",
+			"bestvideo",
+		}
 	case "480p":
-		videoFmt = "bestvideo[height<=480]/bestvideo"
+		videoFmts = []string{"bestvideo[height<=480]", "bestvideo"}
 	case "360p":
-		videoFmt = "bestvideo[height<=360]/bestvideo"
+		videoFmts = []string{"bestvideo[height<=360]", "bestvideo"}
 	default:
-		videoFmt = "bestvideo[vcodec^=avc1]/bestvideo"
+		videoFmts = []string{"bestvideo[vcodec^=avc1]", "bestvideo"}
 	}
 	audioFmt = "bestaudio[acodec^=mp4a]/bestaudio"
 	return

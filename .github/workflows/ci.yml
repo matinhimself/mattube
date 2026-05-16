@@ -33,6 +33,7 @@ jobs:
   build-release:
     name: Release build ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: frontend
+    if: ${{ !contains(github.ref_name, '-rc') }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -85,18 +86,61 @@ jobs:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/
 
+  # ── linux/amd64 binary for RC tags (skips the full matrix) ──────────────────
+  build-rc:
+    name: RC build linux/amd64
+    needs: frontend
+    if: ${{ contains(github.ref_name, '-rc') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: client/static/dist/
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: client/go.mod
+          cache-dependency-path: |
+            client/go.sum
+            server/go.sum
+
+      - name: Build mattube-client
+        run: mkdir -p ../bin && go build -o ../bin/mattube-client .
+        working-directory: client
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+
+      - name: Build mattube-server
+        run: go build -o ../bin/mattube-server .
+        working-directory: server
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-linux-amd64
+          path: bin/
+
   # ── .deb packages (linux only) ────────────────────────────────────────────────
   package-deb:
     name: Package .deb (${{ matrix.goarch }})
-    needs: build-release
+    needs:
+      - build-release
+      - build-rc
+    if: ${{ always() && (needs.build-release.result == 'success' || needs.build-rc.result == 'success') }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - goarch: amd64
             deb_arch: amd64
-          - goarch: arm64
-            deb_arch: arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -133,15 +177,9 @@ jobs:
 
       - name: Download yt-dlp and ffmpeg for server deb
         run: |
-          if [ "${{ matrix.goarch }}" = "amd64" ]; then
-            YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
-            FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl.tar.xz"
-          else
-            YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"
-            FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
-          fi
-          curl -sSL "$YTDLP_URL" -o bin/yt-dlp
-          curl -sSL "$FFMPEG_URL" | tar -xJ --strip-components=2 -C bin/ --wildcards '*/bin/ffmpeg'
+          curl -sSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" -o bin/yt-dlp
+          curl -sSL "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl.tar.xz" \
+            | tar -xJ --strip-components=2 -C bin/ --wildcards '*/bin/ffmpeg'
           chmod 755 bin/yt-dlp bin/ffmpeg
 
       - name: Build .deb packages
@@ -155,10 +193,11 @@ jobs:
           name: debs-${{ matrix.goarch }}
           path: dist/
 
-  # ── GitHub Release (on version tags) ──────────────────────────────────────────
+  # ── GitHub Release (on version tags, not RC) ──────────────────────────────────
   release:
     name: GitHub Release
     needs: [build-release, package-deb]
+    if: ${{ !contains(github.ref_name, '-rc') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
