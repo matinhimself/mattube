@@ -180,24 +180,46 @@ func (p *Processor) processStreamingChunked(ctx context.Context, req *Request, j
 	if err != nil {
 		return fmt.Errorf("resolve stream urls: %w", err)
 	}
-	log.Printf("[%s] resolved streams: video=%s audio=%s", req.JobID, videoURL[:min(60, len(videoURL))], audioURL[:min(60, len(audioURL))])
+	audioLog := audioURL
+	if len(audioLog) > 60 {
+		audioLog = audioLog[:60]
+	}
+	if audioLog == "" {
+		audioLog = "(muxed)"
+	}
+	log.Printf("[%s] resolved streams: video=%s audio=%s", req.JobID, videoURL[:min(60, len(videoURL))], audioLog)
 
 	chunkSizeBytes := int64(req.ChunkSizeMB) * 1024 * 1024
 	pattern := filepath.Join(jobDir, "chunk_%05d.ts")
 
-	// ffmpeg downloads both streams, muxes them, and segments by byte size.
-	args := []string{
-		"-y",
-		"-i", videoURL,
-		"-i", audioURL,
-		"-map", "0:v:0",
-		"-map", "1:a:0",
-		"-c", "copy",
-		"-f", "segment",
-		"-segment_format", "mpegts",
-		"-segment_size", strconv.FormatInt(chunkSizeBytes, 10),
-		"-reset_timestamps", "1",
-		pattern,
+	var args []string
+	if audioURL == "" {
+		// Muxed stream: single input, copy all streams.
+		args = []string{
+			"-y",
+			"-i", videoURL,
+			"-c", "copy",
+			"-f", "segment",
+			"-segment_format", "mpegts",
+			"-segment_size", strconv.FormatInt(chunkSizeBytes, 10),
+			"-reset_timestamps", "1",
+			pattern,
+		}
+	} else {
+		// Separate video + audio DASH streams.
+		args = []string{
+			"-y",
+			"-i", videoURL,
+			"-i", audioURL,
+			"-map", "0:v:0",
+			"-map", "1:a:0",
+			"-c", "copy",
+			"-f", "segment",
+			"-segment_format", "mpegts",
+			"-segment_size", strconv.FormatInt(chunkSizeBytes, 10),
+			"-reset_timestamps", "1",
+			pattern,
+		}
 	}
 	log.Printf("[%s] ffmpeg segmenting start: segment_size=%dMB", req.JobID, req.ChunkSizeMB)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
@@ -328,10 +350,16 @@ func (p *Processor) resolveStreamURLs(ctx context.Context, req *Request) (videoU
 		return "", "", err
 	}
 	audioURL, err = getURL([]string{audioFmt})
-	return videoURL, audioURL, err
+	if err != nil {
+		// Audio stream unavailable — videoURL may be a muxed stream already; signal with empty audioURL.
+		log.Printf("[%s] no separate audio stream (%v) — treating video URL as muxed", req.JobID, err)
+		audioURL = ""
+	}
+	return videoURL, audioURL, nil
 }
 
 // ytdlpStreamFormats returns video format selectors (preferred first) and the audio selector.
+// The video list ends with muxed-format fallbacks for videos with no separate DASH streams.
 func ytdlpStreamFormats(quality string) (videoFmts []string, audioFmt string) {
 	switch quality {
 	case "2160p":
@@ -339,31 +367,39 @@ func ytdlpStreamFormats(quality string) (videoFmts []string, audioFmt string) {
 			"bestvideo[height<=2160][vcodec^=avc1]",
 			"bestvideo[height<=2160]",
 			"bestvideo",
+			"best[height<=2160]",
+			"best",
 		}
 	case "1440p":
 		videoFmts = []string{
 			"bestvideo[height<=1440][vcodec^=avc1]",
 			"bestvideo[height<=1440]",
 			"bestvideo",
+			"best[height<=1440]",
+			"best",
 		}
 	case "1080p":
 		videoFmts = []string{
 			"bestvideo[height<=1080][vcodec^=avc1]",
 			"bestvideo[height<=1080]",
 			"bestvideo",
+			"best[height<=1080]",
+			"best",
 		}
 	case "720p":
 		videoFmts = []string{
 			"bestvideo[height<=720][vcodec^=avc1]",
 			"bestvideo[height<=720]",
 			"bestvideo",
+			"best[height<=720]",
+			"best",
 		}
 	case "480p":
-		videoFmts = []string{"bestvideo[height<=480]", "bestvideo"}
+		videoFmts = []string{"bestvideo[height<=480]", "bestvideo", "best[height<=480]", "best"}
 	case "360p":
-		videoFmts = []string{"bestvideo[height<=360]", "bestvideo"}
+		videoFmts = []string{"bestvideo[height<=360]", "bestvideo", "best[height<=360]", "best"}
 	default:
-		videoFmts = []string{"bestvideo[vcodec^=avc1]", "bestvideo"}
+		videoFmts = []string{"bestvideo[vcodec^=avc1]", "bestvideo", "best"}
 	}
 	audioFmt = "bestaudio[acodec^=mp4a]/bestaudio"
 	return
