@@ -43,9 +43,9 @@ type JobStatus struct {
 	DriveFileName string     `json:"drive_file_name,omitempty"`
 	Error         string     `json:"error,omitempty"`
 	UpdatedAt     string     `json:"updated_at"`
-	TotalChunks   int        `json:"total_chunks,omitempty"`
-	ChunkSizeMB   int        `json:"chunk_size_mb,omitempty"`
-	Chunks        []ChunkRef `json:"chunks,omitempty"`
+	TotalChunks    int        `json:"total_chunks,omitempty"`
+	ChunkDurationS int        `json:"chunk_duration_s,omitempty"`
+	Chunks         []ChunkRef `json:"chunks,omitempty"`
 }
 
 // jobCache avoids hitting Drive on every poll for finished jobs.
@@ -302,9 +302,9 @@ func (s *Server) channelVideos(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		URL         string `json:"url"`
-		Quality     string `json:"quality"`
-		ChunkSizeMB int    `json:"chunk_size_mb"`
+		URL            string `json:"url"`
+		Quality        string `json:"quality"`
+		ChunkDurationS int    `json:"chunk_duration_s"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
 		jsonError(w, "url required", http.StatusBadRequest)
@@ -316,11 +316,11 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 
 	jobID := newJobID()
 	req := map[string]any{
-		"job_id":        jobID,
-		"url":           body.URL,
-		"quality":       body.Quality,
-		"requested_at":  time.Now().UTC().Format(time.RFC3339),
-		"chunk_size_mb": body.ChunkSizeMB,
+		"job_id":          jobID,
+		"url":             body.URL,
+		"quality":         body.Quality,
+		"requested_at":    time.Now().UTC().Format(time.RFC3339),
+		"chunk_duration_s": body.ChunkDurationS,
 	}
 
 	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 5*time.Minute)

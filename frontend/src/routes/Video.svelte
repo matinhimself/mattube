@@ -12,7 +12,7 @@
   let descExpanded = $state(false)
 
   let selectedQuality = $state('1080p')
-  let chunkSizeMB = $state(0)
+  let chunkDurationS = $state(0)
   let submitting = $state(false)
   let jobStatus = $state<JobStatus | null>(null)
   let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -40,7 +40,7 @@
     if (!info) return
     submitting = true
     try {
-      const { job_id } = await api.submitJob(`https://www.youtube.com/watch?v=${videoId}`, selectedQuality, chunkSizeMB)
+      const { job_id } = await api.submitJob(`https://www.youtube.com/watch?v=${videoId}`, selectedQuality, chunkDurationS)
       jobStatus = { job_id, status: 'pending', progress: 0, updated_at: '' }
       pollTimer = setInterval(() => pollStatus(job_id), 2000)
     } catch (e: any) {
@@ -100,10 +100,10 @@
   const QUALITIES = ['best', '2160p', '1440p', '1080p', '720p', '480p', '360p', 'audio']
   const CHUNK_OPTS = [
     { label: 'No chunks', value: 0 },
-    { label: '5 MB chunks', value: 5 },
-    { label: '10 MB chunks', value: 10 },
-    { label: '20 MB chunks', value: 20 },
-    { label: '50 MB chunks', value: 50 },
+    { label: '2 min chunks', value: 120 },
+    { label: '5 min chunks', value: 300 },
+    { label: '10 min chunks', value: 600 },
+    { label: '20 min chunks', value: 1200 },
   ]
 
   function fmtDuration(s: number) {
@@ -156,7 +156,7 @@
           {/each}
         </select>
 
-        <select bind:value={chunkSizeMB} class="select-base">
+        <select bind:value={chunkDurationS} class="select-base">
           {#each CHUNK_OPTS as o}
             <option value={o.value}>{o.label}</option>
           {/each}

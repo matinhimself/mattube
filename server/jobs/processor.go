@@ -36,7 +36,7 @@ func NewProcessor(dc *drive.Client, outputFolder, statusFolder, downloadDir stri
 }
 
 func (p *Processor) Process(ctx context.Context, req *Request) {
-	log.Printf("[%s] starting: %s quality=%s chunk_size_mb=%d", req.JobID, req.URL, req.Quality, req.ChunkSizeMB)
+	log.Printf("[%s] starting: %s quality=%s chunk_size_mb=%d", req.JobID, req.URL, req.Quality, req.ChunkDurationS)
 
 	jobDir := filepath.Join(p.downloadDir, req.JobID)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
@@ -51,8 +51,8 @@ func (p *Processor) Process(ctx context.Context, req *Request) {
 	}
 
 	// Streaming chunked mode: segment while downloading via ffmpeg direct URLs
-	if req.ChunkSizeMB > 0 {
-		log.Printf("[%s] streaming-chunk mode: %d MB segments", req.JobID, req.ChunkSizeMB)
+	if req.ChunkDurationS > 0 {
+		log.Printf("[%s] streaming-chunk mode: %ds segments", req.JobID, req.ChunkDurationS)
 		if err := p.processStreamingChunked(ctx, req, jobDir, statusFileID); err != nil {
 			p.updateStatus(ctx, statusFileID, req.JobID, StatusFailed, 0, "", err.Error())
 		}
@@ -189,7 +189,7 @@ func (p *Processor) processStreamingChunked(ctx context.Context, req *Request, j
 	}
 	log.Printf("[%s] resolved streams: video=%s audio=%s", req.JobID, videoURL[:min(60, len(videoURL))], audioLog)
 
-	chunkSizeBytes := int64(req.ChunkSizeMB) * 1024 * 1024
+	segTime := strconv.Itoa(req.ChunkDurationS)
 	pattern := filepath.Join(jobDir, "chunk_%05d.ts")
 
 	var args []string
@@ -201,7 +201,7 @@ func (p *Processor) processStreamingChunked(ctx context.Context, req *Request, j
 			"-c", "copy",
 			"-f", "segment",
 			"-segment_format", "mpegts",
-			"-segment_size", strconv.FormatInt(chunkSizeBytes, 10),
+			"-segment_time", segTime,
 			"-reset_timestamps", "1",
 			pattern,
 		}
@@ -216,12 +216,12 @@ func (p *Processor) processStreamingChunked(ctx context.Context, req *Request, j
 			"-c", "copy",
 			"-f", "segment",
 			"-segment_format", "mpegts",
-			"-segment_size", strconv.FormatInt(chunkSizeBytes, 10),
+			"-segment_time", segTime,
 			"-reset_timestamps", "1",
 			pattern,
 		}
 	}
-	log.Printf("[%s] ffmpeg segmenting start: segment_size=%dMB", req.JobID, req.ChunkSizeMB)
+	log.Printf("[%s] ffmpeg segmenting start: segment_time=%ss", req.JobID, segTime)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 
 	var ffmpegErrBuf strings.Builder
@@ -265,7 +265,7 @@ func (p *Processor) processStreamingChunked(ctx context.Context, req *Request, j
 			uploadedSet[i] = true
 			uploaded = append(uploaded, ChunkRef{Index: i, DriveFileID: driveID, DurationS: dur})
 			log.Printf("[%s] uploaded chunk %d (%.1fs)", req.JobID, i, dur)
-			p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkSizeMB, -1, uploaded, false)
+			p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkDurationS, -1, uploaded, false)
 		}
 	}
 
@@ -295,7 +295,7 @@ loop:
 	// Upload any remaining chunks.
 	uploadChunks(true)
 
-	p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkSizeMB, len(uploaded), uploaded, true)
+	p.updateChunkStatus(ctx, statusFileID, req.JobID, req.ChunkDurationS, len(uploaded), uploaded, true)
 	log.Printf("[%s] streaming-chunk done: %d chunks", req.JobID, len(uploaded))
 	return nil
 }
@@ -409,7 +409,7 @@ func ytdlpStreamFormats(quality string) (videoFmts []string, audioFmt string) {
 	return
 }
 
-func (p *Processor) updateChunkStatus(ctx context.Context, fileID, jobID string, chunkSizeMB, totalChunks int, chunks []ChunkRef, done bool) {
+func (p *Processor) updateChunkStatus(ctx context.Context, fileID, jobID string, chunkDurationS, totalChunks int, chunks []ChunkRef, done bool) {
 	st := StatusChunking
 	if done {
 		st = StatusDone
@@ -422,7 +422,7 @@ func (p *Processor) updateChunkStatus(ctx context.Context, fileID, jobID string,
 		JobID:       jobID,
 		Status:      st,
 		TotalChunks: total,
-		ChunkSizeMB: chunkSizeMB,
+		ChunkDurationS: chunkDurationS,
 		Chunks:      chunks,
 		UpdatedAt:   now(),
 	}

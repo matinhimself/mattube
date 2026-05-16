@@ -23,7 +23,7 @@ type Request struct {
 	URL         string `json:"url"`
 	Quality     string `json:"quality"`
 	RequestedAt string `json:"requested_at"`
-	ChunkSizeMB int    `json:"chunk_size_mb,omitempty"`
+	ChunkDurationS int `json:"chunk_duration_s,omitempty"`
 }
 
 // ChunkRef identifies a single uploaded segment.
@@ -43,7 +43,7 @@ type Status struct {
 	Error         string     `json:"error,omitempty"`
 	UpdatedAt     string     `json:"updated_at"`
 	TotalChunks   int        `json:"total_chunks,omitempty"`
-	ChunkSizeMB   int        `json:"chunk_size_mb,omitempty"`
+	ChunkDurationS int       `json:"chunk_duration_s,omitempty"`
 	Chunks        []ChunkRef `json:"chunks,omitempty"`
 }
 
